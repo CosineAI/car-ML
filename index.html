@@ -2,130 +2,643 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <title>Run evolve_car.py in the Browser (Pyodide)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>evolve_car.py — Source Viewer</title>
-  <link rel="preconnect" href="https://unpkg.com">
-  <link rel="stylesheet" href="https://unpkg.com/prismjs@1.29.0/themes/prism.min.css">
   <style>
     :root { color-scheme: light dark; }
     html, body { height: 100%; }
     body {
       margin: 0;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      background: var(--bg, #fff);
     }
     header {
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      padding: 0.9rem 1.1rem;
+      position: sticky; top: 0; z-index: 10;
       background: #f5f5f7;
       border-bottom: 1px solid rgba(0,0,0,.08);
+      padding: .8rem 1rem;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
     }
-    h1 {
-      font-size: 1.1rem;
-      margin: 0;
-      font-weight: 600;
+    header h1 { font-size: 1.05rem; margin: 0; }
+    main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: .7rem;
+      margin-bottom: 1rem;
+      align-items: end;
     }
-    main {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 1rem;
+    label { font-size: .9rem; color: #555; display: block; margin-bottom: .25rem; }
+    input[type="number"], input[type="text"], select {
+      width: 100%; padding: .45rem .6rem; border-radius: 8px; border: 1px solid rgba(0,0,0,.2); background: #fff; color: #111;
     }
-    .note {
-      margin: .4rem 0 1rem 0;
-      color: #666;
-      font-size: .95rem;
+    button {
+      cursor: pointer; border: 1px solid rgba(0,0,0,.15); padding: .5rem .75rem; border-radius: 8px; background: #fff; color: #111;
     }
-    pre {
-      border-radius: 10px;
-      box-shadow: 0 1px 18px rgba(0,0,0,.06);
-      overflow: auto;
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+    .out {
+      margin-top: 1rem;
+      background: #0b1020; color: #c7e1ff;
+      border-radius: 10px; padding: .75rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap; max-height: 240px; overflow: auto;
     }
-    .toolbar {
-      display: flex;
-      gap: .75rem;
-      align-items: center;
-      justify-content: space-between;
-      margin: .25rem 0 .85rem;
-      flex-wrap: wrap;
+    canvas {
+      width: 100%; height: 420px; background: #f8fafc; border: 1px solid rgba(0,0,0,.08); border-radius: 12px;
     }
-    .btn {
-      cursor: pointer;
-      border: 1px solid rgba(0,0,0,.15);
-      background: #fff;
-      color: #111;
-      padding: .45rem .65rem;
-      border-radius: 8px;
-      font-size: .9rem;
-    }
-    .btn:active { transform: translateY(1px); }
+    .stat { font-size: .95rem; color: #444; }
+    .note { font-size: .9rem; color: #666; margin-top: .6rem; }
     @media (prefers-color-scheme: dark) {
       header { background: #1f1f1f; border-bottom-color: #2a2a2a; }
-      .note { color: #aaa; }
-      .btn { background: #2b2b2b; color: #eee; border-color: #444; }
-      pre { box-shadow: 0 1px 18px rgba(0,0,0,.3); }
+      input, select, button { background: #262626; color: #eee; border-color: #444; }
+      canvas { background: #121416; border-color: #222; }
+      .stat { color: #bbb; }
+      .note { color: #9aa4ad; }
     }
   </style>
+  <script defer src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
 </head>
 <body>
   <header>
-    <h1>evolve_car.py — Source Viewer</h1>
+    <h1>Run evolve_car.py in the Browser (Pyodide)</h1>
   </header>
   <main>
-    <div class="toolbar">
-      <div class="note">
-        Viewing evolve_car.py. To run locally: <code>python evolve_car.py --gens 20</code>
+    <section class="controls">
+      <div>
+        <label for="gens">Generations</label>
+        <input id="gens" type="number" min="5" max="200" step="1" value="20">
       </div>
-      <button id="copy-btn" class="btn" type="button">Copy</button>
-    </div>
+      <div>
+        <label for="pop">Population size</label>
+        <input id="pop" type="number" min="8" max="100" step="1" value="24">
+      </div>
+      <div>
+        <label for="seed">Seed (empty = random)</label>
+        <input id="seed" type="text" placeholder="e.g. 42">
+      </div>
+      <div>
+        <label for="verbosity">Verbosity</label>
+        <select id="verbosity">
+          <option value="verbose" selected>Verbose</option>
+          <option value="quiet">Quiet</option>
+        </select>
+      </div>
+      <div class="row">
+        <button id="runBtn">Run Evolution</button>
+        <button id="downloadBtn" disabled>Download results JSON</button>
+      </div>
+      <div class="row" id="animControls">
+        <button id="playBtn" disabled>Play</button>
+        <button id="pauseBtn" disabled>Pause</button>
+        <button id="resetBtn" disabled>Reset</button>
+        <label>
+          Speed
+          <select id="speed">
+            <option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+          </select>
+        </label>
+      </div>
+    </section>
 
-    <pre><code id="code" class="language-python">Loading...</code></pre>
-    <p class="note" id="hint"></p>
+    <section>
+      <div class="stat" id="summary">Not run yet.</div>
+      <div class="note">After running, click Play to animate the evolved car moving over the terrain. The static plot shows the final stopping position too.</div>
+      <canvas id="plot" width="1100" height="420"></canvas>
+      <div class="out" id="out"></div>
+    </section>
   </main>
 
-  <!-- Prism core and autoloader to fetch the Python component -->
-  <script src="https://unpkg.com/prismjs@1.29.0/components/prism-core.min.js"></script>
-  <script src="https://unpkg.com/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js" data-autoloader-path="https://unpkg.com/prismjs@1.29.0/components/"></script>
   <script>
-    (async function () {
-      const codeEl = document.getElementById('code');
-      const hintEl = document.getElementById('hint');
+    // UI references
+    const runBtn = document.getElementById('runBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const speedSel = document.getElementById('speed');
+
+    const outEl = document.getElementById('out');
+    const canvas = document.getElementById('plot');
+    const ctx = canvas.getContext('2d');
+    const summaryEl = document.getElementById('summary');
+
+    // Pyodide runtime
+    let pyodideInstance = null;
+    let moduleLoaded = false;
+
+    // Last result and animation state
+    let lastResult = null;
+    let viewport = null;
+    let anim = null; // {running, done, dt, speedFactor, lastMs, lag, state:{xr, xf, t}, car, terrain, rafId}
+
+    function appendOutput(s) {
+      outEl.textContent += s;
+      outEl.scrollTop = outEl.scrollHeight;
+    }
+    // Expose to Python via js.appendOutput
+    window.appendOutput = appendOutput;
+
+    function clearOutput() {
+      outEl.textContent = '';
+    }
+
+    async function initPyodide() {
+      if (!pyodideInstance) {
+        appendOutput('Loading Python runtime (Pyodide)...\\n');
+        pyodideInstance = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/' });
+        appendOutput('Pyodide loaded.\\n');
+      }
+      return pyodideInstance;
+    }
+
+    async function loadModule() {
+      if (moduleLoaded) return;
+      const srcResp = await fetch('evolve_car.py', { cache: 'no-store' });
+      if (!srcResp.ok) throw new Error('Failed to fetch evolve_car.py: ' + srcResp.status);
+      const src = await srcResp.text();
+      // Write file into Pyodide FS and import as a module (main guard won't run)
+      pyodideInstance.FS.writeFile('evolve_car.py', src);
+      await pyodideInstance.runPythonAsync(`
+import sys, js
+# Redirect stdout/stderr to JS
+class _JSWriter:
+    def write(self, s):
+        js.appendOutput(s)
+    def flush(self): pass
+import sys as _sys
+_sys.stdout = _JSWriter()
+_sys.stderr = _JSWriter()
+
+import importlib, evolve_car
+importlib.reload(evolve_car)
+`);
+      moduleLoaded = true;
+      appendOutput('Loaded evolve_car.py module.\\n');
+    }
+
+    function parseSeed(str) {
+      const s = String(str || '').trim();
+      if (!s) return null;
+      const n = Number(s);
+      return Number.isFinite(n) ? Math.floor(n) : null;
+    }
+
+    async function runEvolution() {
+      runBtn.disabled = true;
+      downloadBtn.disabled = true;
+      setAnimControlsEnabled(false);
+      clearOutput();
+      summaryEl.textContent = 'Running...';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       try {
-        const res = await fetch('evolve_car.py', { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const text = await res.text();
-        codeEl.textContent = text;
-        if (window.Prism && Prism.highlightElement) {
-          Prism.highlightElement(codeEl);
-        }
+        await initPyodide();
+        await loadModule();
+
+        const gens = Math.max(5, Math.min(200, parseInt(document.getElementById('gens').value || '20', 10)));
+        const pop = Math.max(8, Math.min(100, parseInt(document.getElementById('pop').value || '24', 10)));
+        const seed = parseSeed(document.getElementById('seed').value);
+        const verbose = document.getElementById('verbosity').value === 'verbose';
+
+        // Compose the Python call
+        const py = `
+import importlib, evolve_car as ec
+importlib.reload(ec)
+ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : 'int(' + seed + ')'}, verbose=${verbose ? 'True' : 'False'})
+`;
+        await pyodideInstance.runPythonAsync(py);
+
+        // Read results from Pyodide FS
+        const path = 'results/best_car.json';
+        const fileText = pyodideInstance.FS.readFile(path, { encoding: 'utf8' });
+        const result = JSON.parse(fileText);
+        lastResult = result;
+
+        // Update summary
+        const car = result.best_car || {};
+        const bestDist = result.best_fitness || 0;
+        summaryEl.textContent = `Best distance: ${bestDist.toFixed(2)} | Car: r1=${num(car.r1)}, r2=${num(car.r2)}, L=${num(car.length)}, clearance=${num(car.clearance)} | Seed=${result.seed}`;
+
+        // Enable download
+        downloadBtn.disabled = false;
+        downloadBtn.onclick = () => downloadJSON(fileText, 'best_car.json');
+
+        // Prepare viewport and draw initial (final) static view
+        viewport = prepareViewport(result);
+        drawFrame(viewport, { xr: bestDist, xf: bestDist + car.length, t: 0 }, car, result.terrain);
+
+        // Init and auto-start animation
+        initAnimation(result, viewport);
+        setAnimControlsEnabled(true);
+        startAnimation();
       } catch (err) {
-        codeEl.textContent =
-`Failed to load evolve_car.py.
+        appendOutput('\\nERROR: ' + (err && err.message ? err.message : String(err)) + '\\n');
+        summaryEl.textContent = 'Error. See output log.';
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
 
-If you are opening this file directly via file://, most browsers block fetch() for local files.
-Run a simple local web server in this folder:
+    function setAnimControlsEnabled(enabled) {
+      playBtn.disabled = !enabled;
+      pauseBtn.disabled = !enabled;
+      resetBtn.disabled = !enabled;
+    }
 
-    python -m http.server 8000
+    function num(v) {
+      return typeof v === 'number' && isFinite(v) ? v.toFixed(3) : '—';
+    }
 
-Then open:
-    http://localhost:8000/index.html`;
-        hintEl.textContent = String(err);
+    function downloadJSON(text, filename) {
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        a.remove();
+      }, 0);
+    }
+
+    // ----- Animation prep and loop -----
+    function initAnimation(result, view) {
+      const car = result.best_car;
+      const terrain = result.terrain;
+      anim = {
+        running: false,
+        done: false,
+        dt: 0.02,
+        maxTime: 25.0,
+        speedFactor: parseFloat(speedSel.value || '1') || 1,
+        lastMs: 0,
+        lag: 0,
+        state: { xr: 0, xf: car.length, t: 0 },
+        car, terrain,
+        rafId: 0
+      };
+      drawFrame(view, anim.state, car, terrain);
+      updateAnimSummary();
+    }
+
+    function startAnimation() {
+      if (!anim || anim.running) return;
+      anim.running = true;
+      anim.lastMs = performance.now();
+      anim.rafId = requestAnimationFrame(loop);
+    }
+
+    function pauseAnimation() {
+      if (!anim) return;
+      anim.running = false;
+      if (anim.rafId) cancelAnimationFrame(anim.rafId);
+      anim.rafId = 0;
+      updateAnimSummary();
+    }
+
+    function resetAnimation() {
+      if (!anim) return;
+      anim.running = false;
+      anim.done = false;
+      anim.state.xr = 0;
+      anim.state.xf = anim.car.length;
+      anim.state.t = 0;
+      anim.lag = 0;
+      drawFrame(viewport, anim.state, anim.car, anim.terrain);
+      updateAnimSummary();
+    }
+
+    function loop(ts) {
+      if (!anim || !anim.running) return;
+      const dtFrame = (ts - anim.lastMs) / 1000;
+      anim.lastMs = ts;
+      anim.lag += dtFrame * anim.speedFactor;
+
+      const maxSteps = 200; // avoid spiral of death
+      let steps = 0;
+      while (anim.lag >= anim.dt && !anim.done && steps < maxSteps) {
+        stepOnce(anim);
+        anim.lag -= anim.dt;
+        steps++;
       }
 
-      document.getElementById('copy-btn').addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(codeEl.textContent);
-          const btn = document.getElementById('copy-btn');
-          const old = btn.textContent;
-          btn.textContent = 'Copied';
-          setTimeout(() => (btn.textContent = old), 1200);
-        } catch {
-          alert('Copy failed — your browser may not allow clipboard access on file:// pages.');
-        }
-      });
-    })();
+      drawFrame(viewport, anim.state, anim.car, anim.terrain);
+      updateAnimSummary();
+
+      if (!anim.done && anim.running) {
+        anim.rafId = requestAnimationFrame(loop);
+      } else {
+        anim.running = false;
+      }
+    }
+
+    function updateAnimSummary() {
+      if (!lastResult || !anim) return;
+      const bestDist = lastResult.best_fitness || 0;
+      const car = anim.car;
+      const prefix = `Best distance: ${bestDist.toFixed(2)} | Car: r1=${num(car.r1)}, r2=${num(car.r2)}, L=${num(car.length)}, clearance=${num(car.clearance)}`;
+      const live = ` | Anim: t=${anim.state.t.toFixed(2)}s, x=${anim.state.xr.toFixed(2)}${anim.done ? ' (stopped)' : ''}`;
+      summaryEl.textContent = prefix + live;
+    }
+
+    function stepOnce(anim) {
+      const car = anim.car;
+      const terrain = anim.terrain;
+      const dt = anim.dt;
+
+      let xr = anim.state.xr;
+      let xf = anim.state.xf;
+
+      const yr = terrainHeight(xr, terrain);
+      const yf = terrainHeight(xf, terrain);
+      const pr = [xr, yr + car.r1];
+      const pf = [xf, yf + car.r2];
+
+      // Collision check
+      if (collidesWithTerrain(pr, pf, car.clearance, terrain, 40)) {
+        anim.done = true;
+        return;
+      }
+
+      // Speed components (mirror Python logic)
+      const slope_r = Math.abs(terrainSlope(xr, terrain));
+      const slope_f = Math.abs(terrainSlope(xf, terrain));
+      const k_slope = 1.2, k_rough = 3.8;
+
+      const slope_penalty = 1.0 / (1.0 + k_slope * (Math.max(slope_r, slope_f) ** 2));
+      const rough = roughness(xr, xf, terrain, 25);
+      const rough_penalty = 1.0 / (1.0 + k_rough * rough);
+
+      const ahead = 0.25;
+      const delta_front = terrainHeight(xf + ahead, terrain) - terrainHeight(xf, terrain);
+      let stall_penalty = 1.0;
+      if (delta_front > 0.85 * car.r2) {
+        stall_penalty *= 0.25;
+      } else if (delta_front > 0.55 * car.r2) {
+        stall_penalty *= 0.5;
+      }
+
+      const [b1, b2] = chassisBottomLine(pr, pf, car.clearance);
+      const xm = 0.5 * (b1[0] + b2[0]);
+      const y_line_mid = lineYAtX(b1, b2, xm);
+      const gap_mid = y_line_mid - terrainHeight(xm, terrain);
+      let gap_penalty = 1.0;
+      // Preserve Python's original order
+      if (gap_mid < car.clearance * 0.25) {
+        gap_penalty *= 0.5;
+      } else if (gap_mid < car.clearance * 0.15) {
+        gap_penalty *= 0.25;
+      }
+
+      const base_speed = 2.2 + 1.6 * ((car.r1 + car.r2) * 0.5);
+      const speed = base_speed * slope_penalty * rough_penalty * stall_penalty * gap_penalty;
+
+      if (speed < 0.02) {
+        anim.done = true;
+        return;
+      }
+
+      const dx = speed * dt;
+      anim.state.xr = xr + dx;
+      anim.state.xf = xf + dx;
+      anim.state.t += dt;
+
+      if (anim.state.t >= anim.maxTime) {
+        anim.done = true;
+      }
+    }
+
+    // ----- Drawing -----
+    function prepareViewport(result) {
+      const terrain = result.terrain;
+      const car = result.best_car;
+      const dist = result.best_fitness || 0;
+
+      // X-range: from 0 to a bit beyond target distance (or terrain extent)
+      const xMin = 0;
+      const marginX = 20;
+      const xEnd = Math.max(120, Math.min(terrainMaxX(terrain), dist + car.length + 30));
+      const xMax = xEnd + marginX;
+
+      // Sample terrain
+      const samples = 800;
+      let yMin = Infinity, yMax = -Infinity;
+      const points = [];
+      for (let i = 0; i < samples; i++) {
+        const x = xMin + (xMax - xMin) * (i / (samples - 1));
+        const y = terrainHeight(x, terrain);
+        points.push([x, y]);
+        if (y < yMin) yMin = y;
+        if (y > yMax) yMax = y;
+      }
+      yMax = Math.max(yMax, terrainHeight(dist, terrain) + Math.max(car.r1, car.r2) + car.clearance * 1.6);
+      yMin = Math.min(yMin, 0) - 0.5;
+
+      const pad = 30;
+      const W = canvas.width, H = canvas.height;
+      const scaleX = (W - 2 * pad) / (xMax - xMin);
+      const scaleY = (H - 2 * pad) / Math.max(1e-6, (yMax - yMin));
+      const X = (x) => pad + (x - xMin) * scaleX;
+      const Y = (y) => H - (pad + (y - yMin) * scaleY);
+
+      return { xMin, xMax, yMin, yMax, pad, W, H, scaleX, scaleY, X, Y, points };
+    }
+
+    function drawFrame(view, state, car, terrain) {
+      const { X, Y, points, W, H, pad, scaleY } = view;
+
+      // Clear
+      ctx.clearRect(0, 0, W, H);
+
+      // Grid
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let gx = 0; gx <= 10; gx++) {
+        const x = pad + (W - 2 * pad) * gx / 10;
+        ctx.moveTo(x, pad);
+        ctx.lineTo(x, H - pad);
+      }
+      for (let gy = 0; gy <= 8; gy++) {
+        const y = pad + (H - 2 * pad) * gy / 8;
+        ctx.moveTo(pad, y);
+        ctx.lineTo(W - pad, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // Terrain
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < points.length; i++) {
+        const [x, y] = points[i];
+        const px = X(x), py = Y(y);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.lineWidth = 2.0;
+      ctx.strokeStyle = '#4f7cac';
+      ctx.stroke();
+      ctx.restore();
+
+      // Car at current state
+      const xr = state.xr;
+      const xf = state.xf;
+      const yr = terrainHeight(xr, terrain) + car.r1;
+      const yf = terrainHeight(xf, terrain) + car.r2;
+      const pr = [xr, yr], pf = [xf, yf];
+      const [b1, b2] = chassisBottomLine(pr, pf, car.clearance);
+
+      // Axle line
+      drawLine(pr, pf, '#cc8f2b', 2.0, [5, 5]);
+
+      // Chassis bottom
+      drawLine(b1, b2, '#e84d4d', 3.0);
+
+      // Wheels
+      drawWheel(pr, car.r1, '#2c7a7b');
+      drawWheel(pf, car.r2, '#2c7a7b');
+
+      function drawLine(p1, p2, color, width = 2, dash = []) {
+        ctx.save();
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+        ctx.beginPath();
+        ctx.moveTo(X(p1[0]), Y(p1[1]));
+        ctx.lineTo(X(p2[0]), Y(p2[1]));
+        ctx.stroke();
+        ctx.restore();
+      }
+      function drawWheel(center, r, color) {
+        ctx.save();
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(44,122,123,0.15)';
+        ctx.beginPath();
+        ctx.arc(X(center[0]), Y(center[1]), r * scaleY, 0, 2 * Math.PI);
+        ctx.fill(); ctx.stroke();
+        // hub
+        ctx.beginPath();
+        ctx.arc(X(center[0]), Y(center[1]), 3, 0, 2 * Math.PI);
+        ctx.fillStyle = color; ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    // ----- Terrain and geometry helpers (mirror Python) -----
+    function terrainMaxX(terrain) {
+      // Estimate scene extent from bumps range if available; default to 400
+      let maxBumpX = 0;
+      for (const b of terrain.bumps || []) {
+        if (b[0] > maxBumpX) maxBumpX = b[0];
+      }
+      return Math.max(200, maxBumpX + 80);
+    }
+
+    function terrainHeight(x, t) {
+      const { amps, freqs, phases, bumps, offset } = t;
+      let y = 0;
+      for (let i = 0; i < amps.length; i++) {
+        y += amps[i] * Math.sin(2 * Math.PI * freqs[i] * x + phases[i]);
+      }
+      for (const b of bumps) {
+        const x0 = b[0], height = b[1], width = b[2];
+        const z = (x - x0) / width;
+        y += height / (1 + z * z);
+      }
+      return y + offset;
+    }
+
+    function terrainSlope(x, t) {
+      const { amps, freqs, phases, bumps } = t;
+      let dy = 0;
+      for (let i = 0; i < amps.length; i++) {
+        dy += amps[i] * (2 * Math.PI * freqs[i]) * Math.cos(2 * Math.PI * freqs[i] * x + phases[i]);
+      }
+      for (const b of bumps) {
+        const x0 = b[0], height = b[1], width = b[2];
+        const z = (x - x0) / width;
+        dy += -2.0 * height * z / (width * Math.pow(1 + z * z, 2));
+      }
+      return dy;
+    }
+
+    function roughness(x1, x2, t, n = 25) {
+      if (x2 <= x1) return 0;
+      const y1 = terrainHeight(x1, t);
+      const y2 = terrainHeight(x2, t);
+      const dx = x2 - x1;
+      const num = Math.max(2, n);
+      const residuals = [];
+      for (let i = 0; i < num; i++) {
+        const x = x1 + dx * (i / (num - 1));
+        const y = terrainHeight(x, t);
+        const y_lin = y1 + (y2 - y1) * ((x - x1) / dx);
+        residuals.push(y - y_lin);
+      }
+      const mean = residuals.reduce((a, b) => a + b, 0) / residuals.length;
+      const varr = residuals.reduce((a, r) => a + (r - mean) * (r - mean), 0) / residuals.length;
+      return Math.sqrt(varr);
+    }
+
+    function chassisBottomLine(p1, p2, clearance) {
+      const [x1, y1] = p1, [x2, y2] = p2;
+      const vx = x2 - x1, vy = y2 - y1;
+      const L = Math.hypot(vx, vy);
+      if (L < 1e-9) {
+        return [[x1, y1 - clearance], [x2, y2 - clearance]];
+      }
+      const ux = vx / L, uy = vy / L;
+      const nxL = -uy, nyL = ux;
+      const nxR = uy, nyR = -ux;
+      const useLeft = nyL < 0;
+      const nx = useLeft ? nxL : nxR;
+      const ny = useLeft ? nyL : nyR;
+      const b1 = [x1 - nx * clearance, y1 - ny * clearance];
+      const b2 = [x2 - nx * clearance, y2 - ny * clearance];
+      return [b1, b2];
+    }
+
+    function lineYAtX(p1, p2, x) {
+      const x1 = p1[0], y1 = p1[1];
+      const x2 = p2[0], y2 = p2[1];
+      const dx = x2 - x1;
+      if (Math.abs(dx) < 1e-9) return Math.max(y1, y2);
+      const t = (x - x1) / dx;
+      return y1 + (y2 - y1) * t;
+    }
+
+    function collidesWithTerrain(p1, p2, clearance, terrain, samples = 40) {
+      const [b1, b2] = chassisBottomLine(p1, p2, clearance);
+      const x_lo = Math.min(b1[0], b2[0]);
+      const x_hi = Math.max(b1[0], b2[0]);
+      for (let i = 0; i < samples; i++) {
+        const x = x_lo + (x_hi - x_lo) * (i / (samples - 1));
+        const y_line = lineYAtX(b1, b2, x);
+        const y_ground = terrainHeight(x, terrain);
+        if (y_ground > y_line) return true;
+      }
+      return false;
+    }
+
+    // ----- Events -----
+    runBtn.addEventListener('click', runEvolution);
+    playBtn.addEventListener('click', () => startAnimation());
+    pauseBtn.addEventListener('click', () => pauseAnimation());
+    resetBtn.addEventListener('click', () => resetAnimation());
+    speedSel.addEventListener('change', () => {
+      if (anim) anim.speedFactor = parseFloat(speedSel.value || '1') || 1;
+    });
+
+    // Auto-run evolution with default settings on first load.
+    // Disable by opening this page with ?noautorun=1
+    window.addEventListener('load', () => {
+      const params = new URLSearchParams(location.search);
+      if (params.get('noautorun') === '1') return;
+      setTimeout(() => runEvolution().catch(() => {}), 50);
+    });
   </script>
 </body>
 </html>
