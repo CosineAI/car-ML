@@ -632,6 +632,15 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
     speedSel.addEventListener('change', () => {
       if (anim) anim.speedFactor = parseFloat(speedSel.value || '1') || 1;
     });
+
+    // Auto-run evolution with default settings on first load.
+    // You can disable this by opening run.html?noautorun=1
+    window.addEventListener('load', () => {
+      const params = new URLSearchParams(location.search);
+      if (params.get('noautorun') === '1') return;
+      // Defer slightly to allow layout to settle
+      setTimeout(() => runEvolution().catch(() => {}), 50);
+    });
   </script>
 </body>
 </html>
