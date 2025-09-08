@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Run evolve_car.py in the Browser (Pyodide)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    header {
+      position: sticky; top: 0; z-index: 10;
+      background: #f5f5f7;
+      border-bottom: 1px solid rgba(0,0,0,.08);
+      padding: .8rem 1rem;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    }
+    header h1 { font-size: 1.05rem; margin: 0; }
+    main { max-width: 1100px; margin: 0 auto; padding: 1rem; }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: .7rem;
+      margin-bottom: 1rem;
+      align-items: end;
+    }
+    label { font-size: .9rem; color: #555; display: block; margin-bottom: .25rem; }
+    input[type="number"], input[type="text"], select {
+      width: 100%; padding: .45rem .6rem; border-radius: 8px; border: 1px solid rgba(0,0,0,.2); background: #fff; color: #111;
+    }
+    button {
+      cursor: pointer; border: 1px solid rgba(0,0,0,.15); padding: .5rem .75rem; border-radius: 8px; background: #fff; color: #111;
+    }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+    .out {
+      margin-top: 1rem;
+      background: #0b1020; color: #c7e1ff;
+      border-radius: 10px; padding: .75rem; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap; max-height: 240px; overflow: auto;
+    }
+    canvas {
+      width: 100%; height: 420px; background: #f8fafc; border: 1px solid rgba(0,0,0,.08); border-radius: 12px;
+    }
+    .stat { font-size: .95rem; color: #444; }
+    .note { font-size: .9rem; color: #666; margin-top: .6rem; }
+    @media (prefers-color-scheme: dark) {
+      header { background: #1f1f1f; border-bottom-color: #2a2a2a; }
+      input, select, button { background: #262626; color: #eee; border-color: #444; }
+      canvas { background: #121416; border-color: #222; }
+      .stat { color: #bbb; }
+      .note { color: #9aa4ad; }
+    }
+  </style>
+  <script defer src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Run evolve_car.py in the Browser (Pyodide)</h1>
+    <a href="index.html">View source</a>
+  </header>
+  <main>
+    <section class="controls">
+      <div>
+        <label for="gens">Generations</label>
+        <input id="gens" type="number" min="5" max="200" step="1" value="20">
+      </div>
+      <div>
+        <label for="pop">Population size</label>
+        <input id="pop" type="number" min="8" max="100" step="1" value="24">
+      </div>
+      <div>
+        <label for="seed">Seed (empty = random)</label>
+        <input id="seed" type="text" placeholder="e.g. 42">
+      </div>
+      <div>
+        <label for="verbosity">Verbosity</label>
+        <select id="verbosity">
+          <option value="verbose" selected>Verbose</option>
+          <option value="quiet">Quiet</option>
+        </select>
+      </div>
+      <div class="row">
+        <button id="runBtn">Run Evolution</button>
+        <button id="downloadBtn" disabled>Download results JSON</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="stat" id="summary">Not run yet.</div>
+      <div class="note">The plot shows the random terrain and the final evolved car at its stopping position.</div>
+      <canvas id="plot" width="1100" height="420"></canvas>
+      <div class="out" id="out"></div>
+    </section>
+  </main>
+
+  <script>
+    // UI references
+    const runBtn = document.getElementById('runBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const outEl = document.getElementById('out');
+    const canvas = document.getElementById('plot');
+    const ctx = canvas.getContext('2d');
+    const summaryEl = document.getElementById('summary');
+
+    // Pyodide runtime
+    let pyodideInstance = null;
+    let moduleLoaded = false;
+
+    function appendOutput(s) {
+      outEl.textContent += s;
+      outEl.scrollTop = outEl.scrollHeight;
+    }
+    // Expose to Python via js.appendOutput
+    window.appendOutput = appendOutput;
+
+    function clearOutput() {
+      outEl.textContent = '';
+    }
+
+    async function initPyodide() {
+      if (!pyodideInstance) {
+        appendOutput('Loading Python runtime (Pyodide)...\n');
+        pyodideInstance = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.24.1/full/' });
+        appendOutput('Pyodide loaded.\n');
+      }
+      return pyodideInstance;
+    }
+
+    async function loadModule() {
+      if (moduleLoaded) return;
+      const srcResp = await fetch('evolve_car.py', { cache: 'no-store' });
+      if (!srcResp.ok) throw new Error('Failed to fetch evolve_car.py: ' + srcResp.status);
+      const src = await srcResp.text();
+      // Write file into Pyodide FS and import as a module (main guard won't run)
+      pyodideInstance.FS.writeFile('evolve_car.py', src);
+      await pyodideInstance.runPythonAsync(`
+import sys, js
+# Redirect stdout/stderr to JS
+class _JSWriter:
+    def write(self, s):
+        js.appendOutput(s)
+    def flush(self): pass
+import sys as _sys
+_sys.stdout = _JSWriter()
+_sys.stderr = _JSWriter()
+
+import importlib, evolve_car
+importlib.reload(evolve_car)
+`);
+      moduleLoaded = true;
+      appendOutput('Loaded evolve_car.py module.\n');
+    }
+
+    function parseSeed(str) {
+      const s = String(str || '').trim();
+      if (!s) return null;
+      const n = Number(s);
+      return Number.isFinite(n) ? Math.floor(n) : null;
+    }
+
+    async function runEvolution() {
+      runBtn.disabled = true;
+      downloadBtn.disabled = true;
+      clearOutput();
+      summaryEl.textContent = 'Running...';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      try {
+        await initPyodide();
+        await loadModule();
+
+        const gens = Math.max(5, Math.min(200, parseInt(document.getElementById('gens').value || '20', 10)));
+        const pop = Math.max(8, Math.min(100, parseInt(document.getElementById('pop').value || '24', 10)));
+        const seed = parseSeed(document.getElementById('seed').value);
+        const verbose = document.getElementById('verbosity').value === 'verbose';
+
+        // Compose the Python call
+        const py = `
+import importlib, evolve_car as ec
+importlib.reload(ec)
+ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, verbose=${verbose ? 'True' : 'False'})
+`;
+        await pyodideInstance.runPythonAsync(py);
+
+        // Read results from Pyodide FS
+        const path = 'results/best_car.json';
+        const fileText = pyodideInstance.FS.readFile(path, { encoding: 'utf8' });
+        const result = JSON.parse(fileText);
+
+        // Update summary
+        const car = result.best_car || {};
+        const bestDist = result.best_fitness || 0;
+        summaryEl.textContent = `Best distance: ${bestDist.toFixed(2)} | Car: r1=${num(car.r1)}, r2=${num(car.r2)}, L=${num(car.length)}, clearance=${num(car.clearance)} | Seed=${result.seed}`;
+
+        // Enable download
+        downloadBtn.disabled = false;
+        downloadBtn.onclick = () => downloadJSON(fileText, 'best_car.json');
+
+        // Draw visualization
+        drawResult(result);
+      } catch (err) {
+        appendOutput('\nERROR: ' + (err && err.message ? err.message : String(err)) + '\n');
+        summaryEl.textContent = 'Error. See output log.';
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    function num(v) {
+      return typeof v === 'number' && isFinite(v) ? v.toFixed(3) : '—';
+    }
+
+    function downloadJSON(text, filename) {
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        a.remove();
+      }, 0);
+    }
+
+    function drawResult(result) {
+      const terrain = result.terrain;
+      const car = result.best_car;
+      const dist = result.best_fitness || 0;
+
+      if (!terrain || !car) {
+        appendOutput('No result to draw.\n');
+        return;
+      }
+
+      // Compute draw range
+      const xMin = 0;
+      const marginX = 20;
+      const xEnd = Math.max(120, Math.min(terrainMaxX(terrain), dist + car.length + 30));
+      const xMax = xEnd + marginX;
+
+      // Sample terrain
+      const samples = 800;
+      let yMin = Infinity, yMax = -Infinity;
+      const points = [];
+      for (let i = 0; i < samples; i++) {
+        const x = xMin + (xMax - xMin) * (i / (samples - 1));
+        const y = terrainHeight(x, terrain);
+        points.push([x, y]);
+        if (y < yMin) yMin = y;
+        if (y > yMax) yMax = y;
+      }
+      yMax = Math.max(yMax, terrainHeight(dist, terrain) + Math.max(car.r1, car.r2) + car.clearance * 1.6);
+      yMin = Math.min(yMin, 0) - 0.5;
+
+      // Map to canvas space
+      const pad = 30;
+      const W = canvas.width, H = canvas.height;
+      const scaleX = (W - 2 * pad) / (xMax - xMin);
+      const scaleY = (H - 2 * pad) / Math.max(1e-6, (yMax - yMin));
+      const X = (x) => pad + (x - xMin) * scaleX;
+      const Y = (y) => H - (pad + (y - yMin) * scaleY);
+
+      // Clear
+      ctx.clearRect(0, 0, W, H);
+
+      // Draw grid lines
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let gx = 0; gx <= 10; gx++) {
+        const x = pad + (W - 2 * pad) * gx / 10;
+        ctx.moveTo(x, pad);
+        ctx.lineTo(x, H - pad);
+      }
+      for (let gy = 0; gy <= 8; gy++) {
+        const y = pad + (H - 2 * pad) * gy / 8;
+        ctx.moveTo(pad, y);
+        ctx.lineTo(W - pad, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // Draw terrain
+      ctx.save();
+      ctx.beginPath();
+      for (let i = 0; i < points.length; i++) {
+        const [x, y] = points[i];
+        const px = X(x), py = Y(y);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.lineWidth = 2.0;
+      ctx.strokeStyle = '#4f7cac';
+      ctx.stroke();
+      ctx.restore();
+
+      // Car geometry at stop position
+      const xr = dist;
+      const xf = xr + car.length;
+      const yr = terrainHeight(xr, terrain) + car.r1;
+      const yf = terrainHeight(xf, terrain) + car.r2;
+      const pr = [xr, yr], pf = [xf, yf];
+      const [b1, b2] = chassisBottomLine(pr, pf, car.clearance);
+
+      // Draw axle line
+      drawLine(pr, pf, '#cc8f2b', 2.0, [5, 5]);
+
+      // Draw chassis bottom
+      drawLine(b1, b2, '#e84d4d', 3.0);
+
+      // Draw wheels
+      drawWheel(pr, car.r1, '#2c7a7b');
+      drawWheel(pf, car.r2, '#2c7a7b');
+
+      // Helpers
+      function drawLine(p1, p2, color, width = 2, dash = []) {
+        ctx.save();
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
+        ctx.beginPath();
+        ctx.moveTo(X(p1[0]), Y(p1[1]));
+        ctx.lineTo(X(p2[0]), Y(p2[1]));
+        ctx.stroke();
+        ctx.restore();
+      }
+      function drawWheel(center, r, color) {
+        ctx.save();
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(44,122,123,0.15)';
+        ctx.beginPath();
+        ctx.arc(X(center[0]), Y(center[1]), r * scaleY, 0, 2 * Math.PI);
+        ctx.fill(); ctx.stroke();
+        // hub
+        ctx.beginPath();
+        ctx.arc(X(center[0]), Y(center[1]), 3, 0, 2 * Math.PI);
+        ctx.fillStyle = color; ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    function terrainMaxX(terrain) {
+      // Estimate scene extent from bumps range if available; default to 400
+      let maxBumpX = 0;
+      for (const b of terrain.bumps || []) {
+        if (b[0] > maxBumpX) maxBumpX = b[0];
+      }
+      return Math.max(200, maxBumpX + 80);
+    }
+
+    function terrainHeight(x, t) {
+      const { amps, freqs, phases, bumps, offset } = t;
+      let y = 0;
+      for (let i = 0; i < amps.length; i++) {
+        y += amps[i] * Math.sin(2 * Math.PI * freqs[i] * x + phases[i]);
+      }
+      for (const b of bumps) {
+        const x0 = b[0], height = b[1], width = b[2];
+        const z = (x - x0) / width;
+        y += height / (1 + z * z);
+      }
+      return y + offset;
+    }
+
+    function chassisBottomLine(p1, p2, clearance) {
+      const [x1, y1] = p1, [x2, y2] = p2;
+      const vx = x2 - x1, vy = y2 - y1;
+      const L = Math.hypot(vx, vy);
+      if (L < 1e-9) {
+        return [[x1, y1 - clearance], [x2, y2 - clearance]];
+      }
+      const ux = vx / L, uy = vy / L;
+      const nxL = -uy, nyL = ux;
+      const nxR = uy, nyR = -ux;
+      const useLeft = nyL < 0;
+      const nx = useLeft ? nxL : nxR;
+      const ny = useLeft ? nyL : nyR;
+      const b1 = [x1 - nx * clearance, y1 - ny * clearance];
+      const b2 = [x2 - nx * clearance, y2 - ny * clearance];
+      return [b1, b2];
+    }
+
+    runBtn.addEventListener('click', runEvolution);
+  </script>
+</body>
+</html>
