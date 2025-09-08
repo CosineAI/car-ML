@@ -87,11 +87,25 @@
         <button id="runBtn">Run Evolution</button>
         <button id="downloadBtn" disabled>Download results JSON</button>
       </div>
+      <div class="row" id="animControls">
+        <button id="playBtn" disabled>Play</button>
+        <button id="pauseBtn" disabled>Pause</button>
+        <button id="resetBtn" disabled>Reset</button>
+        <label>
+          Speed
+          <select id="speed">
+            <option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+          </select>
+        </label>
+      </div>
     </section>
 
     <section>
       <div class="stat" id="summary">Not run yet.</div>
-      <div class="note">The plot shows the random terrain and the final evolved car at its stopping position.</div>
+      <div class="note">After running, click Play to animate the evolved car moving over the terrain. The static plot shows the final stopping position too.</div>
       <canvas id="plot" width="1100" height="420"></canvas>
       <div class="out" id="out"></div>
     </section>
@@ -101,6 +115,11 @@
     // UI references
     const runBtn = document.getElementById('runBtn');
     const downloadBtn = document.getElementById('downloadBtn');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const speedSel = document.getElementById('speed');
+
     const outEl = document.getElementById('out');
     const canvas = document.getElementById('plot');
     const ctx = canvas.getContext('2d');
@@ -109,6 +128,11 @@
     // Pyodide runtime
     let pyodideInstance = null;
     let moduleLoaded = false;
+
+    // Last result and animation state
+    let lastResult = null;
+    let viewport = null;
+    let anim = null; // {running, done, dt, speedFactor, lastMs, lag, state:{xr, xf, t}, car, terrain, rafId}
 
     function appendOutput(s) {
       outEl.textContent += s;
@@ -165,6 +189,7 @@ importlib.reload(evolve_car)
     async function runEvolution() {
       runBtn.disabled = true;
       downloadBtn.disabled = true;
+      setAnimControlsEnabled(false);
       clearOutput();
       summaryEl.textContent = 'Running...';
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -190,6 +215,7 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
         const path = 'results/best_car.json';
         const fileText = pyodideInstance.FS.readFile(path, { encoding: 'utf8' });
         const result = JSON.parse(fileText);
+        lastResult = result;
 
         // Update summary
         const car = result.best_car || {};
@@ -200,14 +226,26 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
         downloadBtn.disabled = false;
         downloadBtn.onclick = () => downloadJSON(fileText, 'best_car.json');
 
-        // Draw visualization
-        drawResult(result);
+        // Prepare viewport and draw initial (final) static view
+        viewport = prepareViewport(result);
+        drawFrame(viewport, { xr: bestDist, xf: bestDist + car.length, t: 0 }, car, result.terrain);
+
+        // Init and auto-start animation
+        initAnimation(result, viewport);
+        setAnimControlsEnabled(true);
+        startAnimation();
       } catch (err) {
         appendOutput('\nERROR: ' + (err && err.message ? err.message : String(err)) + '\n');
         summaryEl.textContent = 'Error. See output log.';
       } finally {
         runBtn.disabled = false;
       }
+    }
+
+    function setAnimControlsEnabled(enabled) {
+      playBtn.disabled = !enabled;
+      pauseBtn.disabled = !enabled;
+      resetBtn.disabled = !enabled;
     }
 
     function num(v) {
@@ -228,17 +266,160 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       }, 0);
     }
 
-    function drawResult(result) {
+    // ----- Animation prep and loop -----
+    function initAnimation(result, view) {
+      const car = result.best_car;
+      const terrain = result.terrain;
+      anim = {
+        running: false,
+        done: false,
+        dt: 0.02,
+        maxTime: 25.0,
+        speedFactor: parseFloat(speedSel.value || '1') || 1,
+        lastMs: 0,
+        lag: 0,
+        state: { xr: 0, xf: car.length, t: 0 },
+        car, terrain,
+        rafId: 0
+      };
+      drawFrame(view, anim.state, car, terrain);
+      updateAnimSummary();
+    }
+
+    function startAnimation() {
+      if (!anim || anim.running) return;
+      anim.running = true;
+      anim.lastMs = performance.now();
+      anim.rafId = requestAnimationFrame(loop);
+    }
+
+    function pauseAnimation() {
+      if (!anim) return;
+      anim.running = false;
+      if (anim.rafId) cancelAnimationFrame(anim.rafId);
+      anim.rafId = 0;
+      updateAnimSummary();
+    }
+
+    function resetAnimation() {
+      if (!anim) return;
+      anim.running = false;
+      anim.done = false;
+      anim.state.xr = 0;
+      anim.state.xf = anim.car.length;
+      anim.state.t = 0;
+      anim.lag = 0;
+      drawFrame(viewport, anim.state, anim.car, anim.terrain);
+      updateAnimSummary();
+    }
+
+    function loop(ts) {
+      if (!anim || !anim.running) return;
+      const dtFrame = (ts - anim.lastMs) / 1000;
+      anim.lastMs = ts;
+      anim.lag += dtFrame * anim.speedFactor;
+
+      const maxSteps = 200; // avoid spiral of death
+      let steps = 0;
+      while (anim.lag >= anim.dt && !anim.done && steps < maxSteps) {
+        stepOnce(anim);
+        anim.lag -= anim.dt;
+        steps++;
+      }
+
+      drawFrame(viewport, anim.state, anim.car, anim.terrain);
+      updateAnimSummary();
+
+      if (!anim.done && anim.running) {
+        anim.rafId = requestAnimationFrame(loop);
+      } else {
+        anim.running = false;
+      }
+    }
+
+    function updateAnimSummary() {
+      if (!lastResult || !anim) return;
+      const bestDist = lastResult.best_fitness || 0;
+      const car = anim.car;
+      const prefix = `Best distance: ${bestDist.toFixed(2)} | Car: r1=${num(car.r1)}, r2=${num(car.r2)}, L=${num(car.length)}, clearance=${num(car.clearance)}`;
+      const live = ` | Anim: t=${anim.state.t.toFixed(2)}s, x=${anim.state.xr.toFixed(2)}${anim.done ? ' (stopped)' : ''}`;
+      summaryEl.textContent = prefix + live;
+    }
+
+    function stepOnce(anim) {
+      const car = anim.car;
+      const terrain = anim.terrain;
+      const dt = anim.dt;
+
+      let xr = anim.state.xr;
+      let xf = anim.state.xf;
+
+      const yr = terrainHeight(xr, terrain);
+      const yf = terrainHeight(xf, terrain);
+      const pr = [xr, yr + car.r1];
+      const pf = [xf, yf + car.r2];
+
+      // Collision check
+      if (collidesWithTerrain(pr, pf, car.clearance, terrain, 40)) {
+        anim.done = true;
+        return;
+      }
+
+      // Speed components (mirror Python logic)
+      const slope_r = Math.abs(terrainSlope(xr, terrain));
+      const slope_f = Math.abs(terrainSlope(xf, terrain));
+      const k_slope = 1.2, k_rough = 3.8;
+
+      const slope_penalty = 1.0 / (1.0 + k_slope * (Math.max(slope_r, slope_f) ** 2));
+      const rough = roughness(xr, xf, terrain, 25);
+      const rough_penalty = 1.0 / (1.0 + k_rough * rough);
+
+      const ahead = 0.25;
+      const delta_front = terrainHeight(xf + ahead, terrain) - terrainHeight(xf, terrain);
+      let stall_penalty = 1.0;
+      if (delta_front > 0.85 * car.r2) {
+        stall_penalty *= 0.25;
+      } else if (delta_front > 0.55 * car.r2) {
+        stall_penalty *= 0.5;
+      }
+
+      const [b1, b2] = chassisBottomLine(pr, pf, car.clearance);
+      const xm = 0.5 * (b1[0] + b2[0]);
+      const y_line_mid = lineYAtX(b1, b2, xm);
+      const gap_mid = y_line_mid - terrainHeight(xm, terrain);
+      let gap_penalty = 1.0;
+      // Preserve Python's original order
+      if (gap_mid < car.clearance * 0.25) {
+        gap_penalty *= 0.5;
+      } else if (gap_mid < car.clearance * 0.15) {
+        gap_penalty *= 0.25;
+      }
+
+      const base_speed = 2.2 + 1.6 * ((car.r1 + car.r2) * 0.5);
+      const speed = base_speed * slope_penalty * rough_penalty * stall_penalty * gap_penalty;
+
+      if (speed < 0.02) {
+        anim.done = true;
+        return;
+      }
+
+      const dx = speed * dt;
+      anim.state.xr = xr + dx;
+      anim.state.xf = xf + dx;
+      anim.state.t += dt;
+
+      if (anim.state.t >= anim.maxTime) {
+        anim.done = true;
+      }
+    }
+
+    // ----- Drawing -----
+    function prepareViewport(result) {
       const terrain = result.terrain;
       const car = result.best_car;
       const dist = result.best_fitness || 0;
 
-      if (!terrain || !car) {
-        appendOutput('No result to draw.\n');
-        return;
-      }
-
-      // Compute draw range
+      // X-range: from 0 to a bit beyond target distance (or terrain extent)
       const xMin = 0;
       const marginX = 20;
       const xEnd = Math.max(120, Math.min(terrainMaxX(terrain), dist + car.length + 30));
@@ -258,7 +439,6 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       yMax = Math.max(yMax, terrainHeight(dist, terrain) + Math.max(car.r1, car.r2) + car.clearance * 1.6);
       yMin = Math.min(yMin, 0) - 0.5;
 
-      // Map to canvas space
       const pad = 30;
       const W = canvas.width, H = canvas.height;
       const scaleX = (W - 2 * pad) / (xMax - xMin);
@@ -266,10 +446,16 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       const X = (x) => pad + (x - xMin) * scaleX;
       const Y = (y) => H - (pad + (y - yMin) * scaleY);
 
+      return { xMin, xMax, yMin, yMax, pad, W, H, scaleX, scaleY, X, Y, points };
+    }
+
+    function drawFrame(view, state, car, terrain) {
+      const { X, Y, points, W, H, pad, scaleY } = view;
+
       // Clear
       ctx.clearRect(0, 0, W, H);
 
-      // Draw grid lines
+      // Grid
       ctx.save();
       ctx.strokeStyle = 'rgba(0,0,0,0.08)';
       ctx.lineWidth = 1;
@@ -287,7 +473,7 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       ctx.stroke();
       ctx.restore();
 
-      // Draw terrain
+      // Terrain
       ctx.save();
       ctx.beginPath();
       for (let i = 0; i < points.length; i++) {
@@ -301,25 +487,24 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       ctx.stroke();
       ctx.restore();
 
-      // Car geometry at stop position
-      const xr = dist;
-      const xf = xr + car.length;
+      // Car at current state
+      const xr = state.xr;
+      const xf = state.xf;
       const yr = terrainHeight(xr, terrain) + car.r1;
       const yf = terrainHeight(xf, terrain) + car.r2;
       const pr = [xr, yr], pf = [xf, yf];
       const [b1, b2] = chassisBottomLine(pr, pf, car.clearance);
 
-      // Draw axle line
+      // Axle line
       drawLine(pr, pf, '#cc8f2b', 2.0, [5, 5]);
 
-      // Draw chassis bottom
+      // Chassis bottom
       drawLine(b1, b2, '#e84d4d', 3.0);
 
-      // Draw wheels
+      // Wheels
       drawWheel(pr, car.r1, '#2c7a7b');
       drawWheel(pf, car.r2, '#2c7a7b');
 
-      // Helpers
       function drawLine(p1, p2, color, width = 2, dash = []) {
         ctx.save();
         ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash(dash);
@@ -343,6 +528,7 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       }
     }
 
+    // ----- Terrain and geometry helpers (mirror Python) -----
     function terrainMaxX(terrain) {
       // Estimate scene extent from bumps range if available; default to 400
       let maxBumpX = 0;
@@ -366,6 +552,38 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       return y + offset;
     }
 
+    function terrainSlope(x, t) {
+      const { amps, freqs, phases, bumps } = t;
+      let dy = 0;
+      for (let i = 0; i < amps.length; i++) {
+        dy += amps[i] * (2 * Math.PI * freqs[i]) * Math.cos(2 * Math.PI * freqs[i] * x + phases[i]);
+      }
+      for (const b of bumps) {
+        const x0 = b[0], height = b[1], width = b[2];
+        const z = (x - x0) / width;
+        dy += -2.0 * height * z / (width * Math.pow(1 + z * z, 2));
+      }
+      return dy;
+    }
+
+    function roughness(x1, x2, t, n = 25) {
+      if (x2 <= x1) return 0;
+      const y1 = terrainHeight(x1, t);
+      const y2 = terrainHeight(x2, t);
+      const dx = x2 - x1;
+      const num = Math.max(2, n);
+      const residuals = [];
+      for (let i = 0; i < num; i++) {
+        const x = x1 + dx * (i / (num - 1));
+        const y = terrainHeight(x, t);
+        const y_lin = y1 + (y2 - y1) * ((x - x1) / dx);
+        residuals.push(y - y_lin);
+      }
+      const mean = residuals.reduce((a, b) => a + b, 0) / residuals.length;
+      const varr = residuals.reduce((a, r) => a + (r - mean) * (r - mean), 0) / residuals.length;
+      return Math.sqrt(varr);
+    }
+
     function chassisBottomLine(p1, p2, clearance) {
       const [x1, y1] = p1, [x2, y2] = p2;
       const vx = x2 - x1, vy = y2 - y1;
@@ -384,7 +602,36 @@ ec.evolve(gens=${gens}, pop_size=${pop}, seed=${seed === null ? 'None' : seed}, 
       return [b1, b2];
     }
 
+    function lineYAtX(p1, p2, x) {
+      const x1 = p1[0], y1 = p1[1];
+      const x2 = p2[0], y2 = p2[1];
+      const dx = x2 - x1;
+      if (Math.abs(dx) < 1e-9) return Math.max(y1, y2);
+      const t = (x - x1) / dx;
+      return y1 + (y2 - y1) * t;
+    }
+
+    function collidesWithTerrain(p1, p2, clearance, terrain, samples = 40) {
+      const [b1, b2] = chassisBottomLine(p1, p2, clearance);
+      const x_lo = Math.min(b1[0], b2[0]);
+      const x_hi = Math.max(b1[0], b2[0]);
+      for (let i = 0; i < samples; i++) {
+        const x = x_lo + (x_hi - x_lo) * (i / (samples - 1));
+        const y_line = lineYAtX(b1, b2, x);
+        const y_ground = terrainHeight(x, terrain);
+        if (y_ground > y_line) return true;
+      }
+      return false;
+    }
+
+    // ----- Events -----
     runBtn.addEventListener('click', runEvolution);
+    playBtn.addEventListener('click', () => startAnimation());
+    pauseBtn.addEventListener('click', () => pauseAnimation());
+    resetBtn.addEventListener('click', () => resetAnimation());
+    speedSel.addEventListener('change', () => {
+      if (anim) anim.speedFactor = parseFloat(speedSel.value || '1') || 1;
+    });
   </script>
 </body>
 </html>
