@@ -136,6 +136,9 @@ class CarParams:
         r_back = rng.uniform(0.35, 1.0)
         r_front = rng.uniform(0.35, 1.0)
         wheelbase = rng.uniform(1.0, 3.0)
+        # Ensure wheels never overlap: wheelbase must be at least sum of radii
+        if wheelbase < (r_back + r_front):
+            wheelbase = r_back + r_front
         body_base_ratio = rng.uniform(0.5, 1.1)  # fraction of wheelbase
         body_height = rng.uniform(0.3, 1.6)
         omega = rng.uniform(1.4, 2.8)
@@ -225,10 +228,17 @@ class CarParams:
             base = self.tri_heights[i] if i < len(self.tri_heights) else base_for_new
             tri_heights_new.append(n(base, 0.2, 2.0))
 
+        # Mutate wheel sizes and wheelbase with non-overlap constraint
+        r_back_new = n(self.r_back, 0.3, 1.2)
+        r_front_new = n(self.r_front, 0.3, 1.2)
+        wheelbase_new = n(self.wheelbase, 0.8, 3.5)
+        if wheelbase_new < (r_back_new + r_front_new):
+            wheelbase_new = r_back_new + r_front_new
+
         return CarParams(
-            r_back=n(self.r_back, 0.3, 1.2),
-            r_front=n(self.r_front, 0.3, 1.2),
-            wheelbase=n(self.wheelbase, 0.8, 3.5),
+            r_back=r_back_new,
+            r_front=r_front_new,
+            wheelbase=wheelbase_new,
             body_base_ratio=n(self.body_base_ratio, 0.4, 1.3),
             body_height=n(self.body_height, 0.2, 2.0),
             omega=n(self.omega, 1.0, 3.2),
