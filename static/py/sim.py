@@ -298,6 +298,55 @@ class Simulator:
         self._y_front = self.terrain.height(self._x_front) + self.params.r_front
         self._distance = self._x_front
 
+    def _body_vertices_world(self, body_base_len: float, phi: float, mx: float, my: float) -> list[list[float]]:
+        verts: list[list[float]] = []
+        half = 0.5 * body_base_len
+        verts.append([-half, 0.0])
+        xs = getattr(self.params, "strip_x_norm", []) or []
+        ys = getattr(self.params, "strip_y", []) or []
+        for xn, y in zip(xs, ys):
+            verts.append([float(xn) * body_base_len, float(y)])
+        verts.append([half, 0.0])
+
+        c = math.cos(phi)
+        s = math.sin(phi)
+        out: list[list[float]] = []
+        for vx, vy in verts:
+            wx = mx + vx * c - vy * s
+            wy = my + vx * s + vy * c
+            out.append([wx, wy])
+        return out
+
+    def _chassis_contact_depth(self, verts_world: list[list[float]]) -> float:
+        if not verts_world or len(verts_world) < 2:
+            return 0.0
+
+        def seg_depth(x0: float, y0: float, x1: float, y1: float, samples: int = 6) -> float:
+            md = 0.0
+            for i in range(samples + 1):
+                t = i / samples
+                x = x0 * (1.0 - t) + x1 * t
+                y = y0 * (1.0 - t) + y1 * t
+                x = clamp(x, 0.0, self.terrain.length)
+                h = self.terrain.height(x)
+                d = h - y
+                if d > md:
+                    md = d
+            return md
+
+        depth = 0.0
+        # consecutive edges
+        for i in range(len(verts_world) - 1):
+            x0, y0 = verts_world[i]
+            x1, y1 = verts_world[i + 1]
+            depth = max(depth, seg_depth(x0, y0, x1, y1))
+        # diagonals of triangle strip
+        for i in range(len(verts_world) - 2):
+            x0, y0 = verts_world[i]
+            x1, y1 = verts_world[i + 2]
+            depth = max(depth, seg_depth(x0, y0, x1, y1))
+        return max(0.0, depth)
+
     def _step_once(self, dt: float = 0.05):
         if self.state.done:
             return
@@ -319,6 +368,14 @@ class Simulator:
         gb = self.terrain.slope(xb)
         gf = self.terrain.slope(xf)
 
+        # Orientation and body geometry
+        phi = math.atan2(yf - yb, L)
+        mx = 0.5 * (xb + xf)
+        my = 0.5 * (yb + yf)
+        body_base_len = clamp(self.params.body_base_ratio * L, 0.3 * L, 1.6 * L)
+        chassis_verts = self._body_vertices_world(body_base_len, phi, mx, my)
+        contact_depth = self._chassis_contact_depth(chassis_verts)
+
         # Effective forward speeds per wheel (units/sec)
         c_penalty = 0.55  # uphill penalty weight
         vb = max(0.0, self.params.omega * self.params.r_back - c_penalty * max(0.0, gb))
@@ -330,6 +387,15 @@ class Simulator:
         slope_limit = 0.95  # ~54 deg
         if abs(math.atan(gb)) > slope_limit or abs(math.atan(gf)) > slope_limit:
             v = 0.0
+
+        # Chassis-ground interaction: reduce or cancel motion if body touches the ground
+        if contact_depth > 0.0:
+            stop_th = 0.05  # world units of penetration at which motion ceases
+            if contact_depth >= stop_th:
+                v = 0.0
+            else:
+                f = 1.0 - (contact_depth / stop_th)
+                v *= f * f  # quadratic damping with penetration
 
         dx = v * dt
         if dx < 1e-4:
