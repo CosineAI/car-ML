@@ -8,6 +8,10 @@ def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
+# Ensure wheels have a bit of extra clearance beyond just touching
+MIN_WHEELBASE_FACTOR = 1.1  # wheelbase must be at least this times (r_back + r_front)
+
+
 class Terrain:
     def __init__(self, length: float = 2000.0, seed: int | None = None):
         self.length = float(length)
@@ -136,9 +140,10 @@ class CarParams:
         r_back = rng.uniform(0.35, 1.0)
         r_front = rng.uniform(0.35, 1.0)
         wheelbase = rng.uniform(1.0, 3.0)
-        # Ensure wheels never overlap: wheelbase must be at least sum of radii
-        if wheelbase < (r_back + r_front):
-            wheelbase = r_back + r_front
+        # Ensure wheels have clearance: at least a factor times sum of radii
+        min_wb = (r_back + r_front) * MIN_WHEELBASE_FACTOR
+        if wheelbase < min_wb:
+            wheelbase = min_wb
         body_base_ratio = rng.uniform(0.5, 1.1)  # fraction of wheelbase
         body_height = rng.uniform(0.3, 1.6)
         omega = rng.uniform(1.4, 2.8)
@@ -232,8 +237,9 @@ class CarParams:
         r_back_new = n(self.r_back, 0.3, 1.2)
         r_front_new = n(self.r_front, 0.3, 1.2)
         wheelbase_new = n(self.wheelbase, 0.8, 3.5)
-        if wheelbase_new < (r_back_new + r_front_new):
-            wheelbase_new = r_back_new + r_front_new
+        min_wb = (r_back_new + r_front_new) * MIN_WHEELBASE_FACTOR
+        if wheelbase_new < min_wb:
+            wheelbase_new = min_wb
 
         return CarParams(
             r_back=r_back_new,
