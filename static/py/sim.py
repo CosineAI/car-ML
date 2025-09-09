@@ -283,6 +283,9 @@ class Simulator:
         self.best_params: CarParams | None = None
         self.best_distance: float = 0.0
         self.attempt: int = 0
+        # Evolution/debug tracking for UI
+        self._evo_source: str = "random_init"
+        self._evo_parent_best_distance: float = 0.0
 
         self._init_new_car(random_init=True)
         self._just_finished = False
@@ -294,18 +297,27 @@ class Simulator:
         self.best_params = None
         self.best_distance = 0.0
         self.attempt = 0
+        # Reset evolution/debug tracking
+        self._evo_source = "random_init"
+        self._evo_parent_best_distance = 0.0
         self._init_new_car(random_init=True)
         self._just_finished = False
 
     def _init_new_car(self, random_init: bool = False):
+        # Record the current best distance as the parent's performance (for UI)
+        self._evo_parent_best_distance = self.best_distance
+
         if random_init or self.best_params is None:
             self.params = CarParams.create_random(self.rng)
+            self._evo_source = "random_init"
         else:
             # Hill climbing with occasional exploration
             if self.rng.random() < 0.2:
                 self.params = CarParams.create_random(self.rng)
+                self._evo_source = "exploration_random"
             else:
                 self.params = self.best_params.mutated(self.rng, scale=0.18)
+                self._evo_source = "mutated_from_best"
 
         # Start just at x=0
         self.state = CarState(x_back=0.0)
@@ -483,6 +495,18 @@ class Simulator:
             "tri_heights": [float(h) for h in self.params.tri_heights],
             # New: explicit triangle strip vertices for edge-attached triangles
             "tri_strip": strip_vertices,
+            # Evolution/debug info for UI
+            "evolution": {
+                "source": self._evo_source,
+                "parent_best_distance": float(self._evo_parent_best_distance),
+                "genes": {
+                    "r_back": float(self.params.r_back),
+                    "r_front": float(self.params.r_front),
+                    "wheelbase": float(self.params.wheelbase),
+                    "strip_kind": str(self.params.strip_kind),
+                    "strip_count": int(len(getattr(self.params, "strip_x_norm", []))),
+                },
+            },
             "back_wheel": {
                 "x": float(self.state.x_back),
                 "y": float(self._y_back),

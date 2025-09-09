@@ -12,7 +12,15 @@
   const attemptIdxEl = document.getElementById('attemptIdx');
   const bestDistEl = document.getElementById('bestDist');
   const curDistEl = document.getElementById('curDist');
-
+  // Evolution panel elements
+  const evoSourceEl = document.getElementById('evoSource');
+  const parentBestEl = document.getElementById('parentBestDist');
+  const geneRBackEl = document.getElementById('geneRBack');
+  const geneRFrontEl = document.getElementById('geneRFront');
+  const geneWBEl = document.getElementById('geneWheelbase');
+  const geneStripKindEl = document.getElementById('geneStripKind');
+  const geneStripCountEl = document.getElementById('geneStripCount');
+  
   // World/view settings
   const UNITS_X = 60; // how many world units fit across the canvas width
   const xScale = canvas.width / UNITS_X;
@@ -253,6 +261,33 @@
     curDistEl.textContent = data.current_distance.toFixed(2);
   }
 
+  function updateEvolution(data) {
+    if (!data || !data.evolution) return;
+    const evo = data.evolution;
+
+    const srcMap = {
+      mutated_from_best: 'Mutated from best',
+      exploration_random: 'Random exploration',
+      random_init: 'Initial random',
+    };
+    evoSourceEl.textContent = srcMap[evo.source] || '—';
+
+    const pbd = (typeof evo.parent_best_distance === 'number' && isFinite(evo.parent_best_distance))
+      ? evo.parent_best_distance : 0;
+    parentBestEl.textContent = pbd.toFixed(2);
+
+    const genes = evo.genes || {};
+    const rb = (typeof genes.r_back === 'number' ? genes.r_back : 0);
+    const rf = (typeof genes.r_front === 'number' ? genes.r_front : 0);
+    const wb = (typeof genes.wheelbase === 'number' ? genes.wheelbase : 0);
+    geneRBackEl.textContent = rb.toFixed(2);
+    geneRFrontEl.textContent = rf.toFixed(2);
+    geneWBEl.textContent = wb.toFixed(2);
+    geneStripKindEl.textContent = genes.strip_kind || '-';
+    const sc = (typeof genes.strip_count === 'number' ? genes.strip_count : 0);
+    geneStripCountEl.textContent = String(sc);
+  }
+
   async function init() {
     playBtn.disabled = true;
     resetBtn.disabled = true;
@@ -297,6 +332,7 @@ sim`);
     drawGrid(initial.camera_x);
     drawTerrain(initial.camera_x);
     updateStats(initial);
+    updateEvolution(initial);
   }
 
   function loop() {
@@ -325,6 +361,7 @@ sim`);
     drawBody(back, front, body, frame.camera_x);
 
     updateStats(frame);
+    updateEvolution(frame);
 
     if (frame.done) {
       // Allow a small pause to let the viewer see end of run
@@ -376,6 +413,7 @@ sim`);
     drawGrid(init.camera_x);
     drawTerrain(init.camera_x);
     updateStats(init);
+    updateEvolution(init);
   });
 
   window.addEventListener('resize', () => {
