@@ -18,6 +18,13 @@ html, body {
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
 }
 
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  overflow: hidden; /* avoid vertical scroll on large screens */
+}
+
 header {
   padding: 14px 18px;
   background: linear-gradient(90deg, #10131b, #0e1117);
@@ -98,12 +105,17 @@ h1 {
 
 main {
   padding: 12px 18px 24px;
+  flex: 1 1 auto;
+  display: flex;
+  justify-content: center; /* center canvas horizontally when letterboxed */
+  min-height: 0; /* allow canvas to size within viewport */
 }
 
 canvas {
-  width: 100%;
-  height: auto;
   display: block;
+  margin-left: auto;
+  margin-right: auto;
+  aspect-ratio: 11 / 6;
   background: linear-gradient(180deg, #0a0e16 0%, #0d1117 100%);
   border-radius: 12px;
   border: 1px solid #1f2432;
