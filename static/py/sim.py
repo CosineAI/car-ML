@@ -57,29 +57,196 @@ class CarParams:
     body_base_ratio: float
     body_height: float
     omega: float
+    # Legacy/simple segmentation
+    n_tris: int
+    tri_heights: list[float]
+    # Edge-attached triangle strip around center (interior vertices)
+    strip_kind: str
+    strip_x_norm: list[float]  # in (-0.5, 0.5), strictly increasing
+    strip_y: list[float]       # world units relative to axle at those x
+
+    @staticmethod
+    def _generate_random_strip(rng: random.Random, body_height: float) -> tuple[str, list[float], list[float]]:
+        kinds = ["uniform_zigzag", "center_cluster", "diamond_center", "split_clusters", "arch"]
+        kind = rng.choice(kinds)
+
+        def clamp01(x: float) -> float:
+            return max(-0.48, min(0.48, x))
+
+        if kind == "diamond_center":
+            # two interior vertices symmetric around center with opposite heights
+            m = 2
+            d = rng.uniform(0.15, 0.35)
+            xs = [-d, d]
+            amp = clamp(rng.gauss(body_height, 0.35), 0.25, 2.0)
+            ys = [amp, -amp] if rng.random() < 0.5 else [-amp, amp]
+            return kind, xs, ys
+
+        if kind == "split_clusters":
+            m = 4
+            centers = [-0.25, 0.25]
+            xs = []
+            for c in centers:
+                xs.extend(sorted(clamp01(rng.gauss(c, 0.06)) for _ in range(2)))
+            xs = sorted(xs)
+            base = clamp(rng.gauss(body_height, 0.3), 0.25, 2.0)
+            ys = []
+            s = 1.0
+            for i in range(m):
+                amp = clamp(rng.gauss(base, 0.25), 0.2, 2.0)
+                ys.append(amp * s)
+                s *= -1.0
+            return kind, xs, ys
+
+        if kind == "center_cluster":
+            m = rng.randint(2, 6)
+            xs = [clamp01(rng.gauss(0.0, 0.12)) for _ in range(m)]
+            xs.sort()
+            base = clamp(rng.gauss(body_height, 0.3), 0.25, 2.0)
+            ys = []
+            s = 1.0
+            for _ in range(m):
+                amp = clamp(rng.gauss(base, 0.25), 0.2, 2.0)
+                ys.append(amp * s)
+                s *= -1.0
+            return kind, xs, ys
+
+        if kind == "arch":
+            m = rng.randint(2, 6)
+            xs = [(-0.45 + (i + 1) * (0.9 / (m + 1))) for i in range(m)]
+            base = clamp(rng.gauss(body_height, 0.25), 0.25, 2.0)
+            ys = [clamp(rng.gauss(base, 0.25), 0.2, 2.0) for _ in range(m)]
+            return kind, xs, ys
+
+        # default uniform_zigzag
+        m = rng.randint(1, 6)
+        xs = [(-0.45 + (i + 1) * (0.9 / (m + 1))) for i in range(m)]
+        base = clamp(rng.gauss(body_height, 0.3), 0.25, 2.0)
+        ys = []
+        s = 1.0
+        for _ in range(m):
+            amp = clamp(rng.gauss(base, 0.25), 0.2, 2.0)
+            ys.append(amp * s)
+            s *= -1.0
+        return "uniform_zigzag", xs, ys
 
     @staticmethod
     def create_random(rng: random.Random) -> "CarParams":
+        # Base car dimensions
+        r_back = rng.uniform(0.35, 1.0)
+        r_front = rng.uniform(0.35, 1.0)
+        wheelbase = rng.uniform(1.0, 3.0)
+        # Ensure wheels never overlap: wheelbase must be at least sum of radii
+        if wheelbase < (r_back + r_front):
+            wheelbase = r_back + r_front
+        body_base_ratio = rng.uniform(0.5, 1.1)  # fraction of wheelbase
+        body_height = rng.uniform(0.3, 1.6)
+        omega = rng.uniform(1.4, 2.8)
+        # Legacy chassis variety (fallback)
+        n_tris = rng.randint(1, 4)
+        tri_heights = [
+            clamp(rng.gauss(body_height, 0.25), 0.2, 2.0) for _ in range(n_tris)
+        ]
+        # Edge-attached triangle strip in center
+        strip_kind, strip_x_norm, strip_y = CarParams._generate_random_strip(rng, body_height)
         return CarParams(
-            r_back=rng.uniform(0.35, 1.0),
-            r_front=rng.uniform(0.35, 1.0),
-            wheelbase=rng.uniform(1.0, 3.0),
-            body_base_ratio=rng.uniform(0.5, 1.1),  # fraction of wheelbase
-            body_height=rng.uniform(0.3, 1.6),
-            omega=rng.uniform(1.4, 2.8),
+            r_back=r_back,
+            r_front=r_front,
+            wheelbase=wheelbase,
+            body_base_ratio=body_base_ratio,
+            body_height=body_height,
+            omega=omega,
+            n_tris=n_tris,
+            tri_heights=tri_heights,
+            strip_kind=strip_kind,
+            strip_x_norm=strip_x_norm,
+            strip_y=strip_y,
         )
 
     def mutated(self, rng: random.Random, scale: float = 0.15) -> "CarParams":
         def n(x, lo, hi, s=scale):
             return clamp(x + rng.gauss(0, s * (hi - lo)), lo, hi)
 
+        # Occasionally regenerate the triangle strip completely (new arrangement)
+        if rng.random() < 0.22:
+            strip_kind, strip_x_norm, strip_y = CarParams._generate_random_strip(rng, self.body_height)
+        else:
+            # Mutate existing strip slightly
+            strip_kind = self.strip_kind
+            strip_x_norm = list(self.strip_x_norm)
+            strip_y = list(self.strip_y)
+
+            # Sometimes add or remove an interior vertex
+            if rng.random() < 0.20:
+                if len(strip_x_norm) < 6 and rng.random() < 0.5:
+                    # insert between random adjacent pair
+                    if strip_x_norm:
+                        j = rng.randrange(0, len(strip_x_norm))
+                        left = -0.5 if j == 0 else strip_x_norm[j - 1]
+                        right = 0.5 if j >= len(strip_x_norm) else strip_x_norm[j]
+                        x_new = clamp(n(0.5 * (left + right), -0.48, 0.48, s=0.05), -0.48, 0.48)
+                    else:
+                        x_new = 0.0
+                    y_base = clamp(n(self.body_height, 0.2, 2.0, s=0.25), 0.2, 2.0)
+                    y_new = y_base if (len(strip_y) % 2 == 0) else -y_base
+                    strip_x_norm.append(x_new)
+                    strip_y.append(y_new)
+                    strip_pairs = sorted(zip(strip_x_norm, strip_y), key=lambda p: p[0])
+                    strip_x_norm = [p[0] for p in strip_pairs]
+                    strip_y = [p[1] for p in strip_pairs]
+                elif len(strip_x_norm) > 1:
+                    k = rng.randrange(0, len(strip_x_norm))
+                    del strip_x_norm[k]
+                    del strip_y[k]
+
+            # Jitter positions and heights
+            for i in range(len(strip_x_norm)):
+                strip_x_norm[i] = clamp(n(strip_x_norm[i], -0.48, 0.48, s=0.06), -0.48, 0.48)
+            # ensure strictly increasing
+            strip_pairs = sorted(zip(strip_x_norm, strip_y), key=lambda p: p[0])
+            strip_x_norm = [p[0] for p in strip_pairs]
+            strip_y = [clamp(n(p[1], -2.0, 2.0, s=0.15), -2.0, 2.0) for p in strip_pairs]
+
+            # If zigzag-like, enforce alternating signs to keep edge-attached variation
+            if strip_kind in {"uniform_zigzag", "center_cluster", "split_clusters"} and strip_y:
+                sgn = 1.0 if strip_y[0] >= 0 else -1.0
+                for i in range(len(strip_y)):
+                    strip_y[i] = abs(strip_y[i]) * (sgn if i % 2 == 0 else -sgn)
+                    # ensure minimum magnitude
+                    if abs(strip_y[i]) < 0.15:
+                        strip_y[i] = (0.2 if strip_y[i] >= 0 else -0.2)
+
+        # Legacy/simple list mutation retained for fallback drawing
+        if rng.random() < 0.2:
+            n_tris_new = self.n_tris + rng.choice([-1, 1])
+            n_tris_new = max(1, min(4, n_tris_new))
+        else:
+            n_tris_new = self.n_tris
+        tri_heights_new: list[float] = []
+        base_for_new = self.body_height
+        for i in range(n_tris_new):
+            base = self.tri_heights[i] if i < len(self.tri_heights) else base_for_new
+            tri_heights_new.append(n(base, 0.2, 2.0))
+
+        # Mutate wheel sizes and wheelbase with non-overlap constraint
+        r_back_new = n(self.r_back, 0.3, 1.2)
+        r_front_new = n(self.r_front, 0.3, 1.2)
+        wheelbase_new = n(self.wheelbase, 0.8, 3.5)
+        if wheelbase_new < (r_back_new + r_front_new):
+            wheelbase_new = r_back_new + r_front_new
+
         return CarParams(
-            r_back=n(self.r_back, 0.3, 1.2),
-            r_front=n(self.r_front, 0.3, 1.2),
-            wheelbase=n(self.wheelbase, 0.8, 3.5),
+            r_back=r_back_new,
+            r_front=r_front_new,
+            wheelbase=wheelbase_new,
             body_base_ratio=n(self.body_base_ratio, 0.4, 1.3),
             body_height=n(self.body_height, 0.2, 2.0),
             omega=n(self.omega, 1.0, 3.2),
+            n_tris=n_tris_new,
+            tri_heights=tri_heights_new,
+            strip_kind=strip_kind,
+            strip_x_norm=strip_x_norm,
+            strip_y=strip_y,
         )
 
 
@@ -141,6 +308,55 @@ class Simulator:
         self._y_front = self.terrain.height(self._x_front) + self.params.r_front
         self._distance = self._x_front
 
+    def _body_vertices_world(self, body_base_len: float, phi: float, mx: float, my: float) -> list[list[float]]:
+        verts: list[list[float]] = []
+        half = 0.5 * body_base_len
+        verts.append([-half, 0.0])
+        xs = getattr(self.params, "strip_x_norm", []) or []
+        ys = getattr(self.params, "strip_y", []) or []
+        for xn, y in zip(xs, ys):
+            verts.append([float(xn) * body_base_len, float(y)])
+        verts.append([half, 0.0])
+
+        c = math.cos(phi)
+        s = math.sin(phi)
+        out: list[list[float]] = []
+        for vx, vy in verts:
+            wx = mx + vx * c - vy * s
+            wy = my + vx * s + vy * c
+            out.append([wx, wy])
+        return out
+
+    def _chassis_contact_depth(self, verts_world: list[list[float]]) -> float:
+        if not verts_world or len(verts_world) < 2:
+            return 0.0
+
+        def seg_depth(x0: float, y0: float, x1: float, y1: float, samples: int = 6) -> float:
+            md = 0.0
+            for i in range(samples + 1):
+                t = i / samples
+                x = x0 * (1.0 - t) + x1 * t
+                y = y0 * (1.0 - t) + y1 * t
+                x = clamp(x, 0.0, self.terrain.length)
+                h = self.terrain.height(x)
+                d = h - y
+                if d > md:
+                    md = d
+            return md
+
+        depth = 0.0
+        # consecutive edges
+        for i in range(len(verts_world) - 1):
+            x0, y0 = verts_world[i]
+            x1, y1 = verts_world[i + 1]
+            depth = max(depth, seg_depth(x0, y0, x1, y1))
+        # diagonals of triangle strip
+        for i in range(len(verts_world) - 2):
+            x0, y0 = verts_world[i]
+            x1, y1 = verts_world[i + 2]
+            depth = max(depth, seg_depth(x0, y0, x1, y1))
+        return max(0.0, depth)
+
     def _step_once(self, dt: float = 0.05):
         if self.state.done:
             return
@@ -162,6 +378,14 @@ class Simulator:
         gb = self.terrain.slope(xb)
         gf = self.terrain.slope(xf)
 
+        # Orientation and body geometry
+        phi = math.atan2(yf - yb, L)
+        mx = 0.5 * (xb + xf)
+        my = 0.5 * (yb + yf)
+        body_base_len = clamp(self.params.body_base_ratio * L, 0.3 * L, 1.6 * L)
+        chassis_verts = self._body_vertices_world(body_base_len, phi, mx, my)
+        contact_depth = self._chassis_contact_depth(chassis_verts)
+
         # Effective forward speeds per wheel (units/sec)
         c_penalty = 0.55  # uphill penalty weight
         vb = max(0.0, self.params.omega * self.params.r_back - c_penalty * max(0.0, gb))
@@ -173,6 +397,15 @@ class Simulator:
         slope_limit = 0.95  # ~54 deg
         if abs(math.atan(gb)) > slope_limit or abs(math.atan(gf)) > slope_limit:
             v = 0.0
+
+        # Chassis-ground interaction: reduce or cancel motion if body touches the ground
+        if contact_depth > 0.0:
+            stop_th = 0.05  # world units of penetration at which motion ceases
+            if contact_depth >= stop_th:
+                v = 0.0
+            else:
+                f = 1.0 - (contact_depth / stop_th)
+                v *= f * f  # quadratic damping with penetration
 
         dx = v * dt
         if dx < 1e-4:
@@ -222,6 +455,15 @@ class Simulator:
         # Body base length in world units (fraction of wheelbase)
         body_base_len = clamp(self.params.body_base_ratio * L, 0.3 * L, 1.6 * L)
 
+        # Build triangle strip vertices in local axle coordinates (rigid body)
+        # Start/end on the axle; interior vertices come from params
+        strip_vertices: list[list[float]] = []
+        strip_vertices.append([-0.5 * body_base_len, 0.0])
+        if getattr(self.params, "strip_x_norm", None) and getattr(self.params, "strip_y", None):
+            for xn, y in zip(self.params.strip_x_norm, self.params.strip_y):
+                strip_vertices.append([float(xn) * body_base_len, float(y)])
+        strip_vertices.append([0.5 * body_base_len, 0.0])
+
         return {
             "attempt": int(self.attempt + 1),
             "best_distance": float(self.best_distance),
@@ -229,7 +471,12 @@ class Simulator:
             "camera_x": float(cam_x),
             "phi": float(phi),
             "body_base_len": float(body_base_len),
+            # Provide both legacy single height and per-triangle heights
             "body_height": float(self.params.body_height),
+            "n_tris": int(self.params.n_tris),
+            "tri_heights": [float(h) for h in self.params.tri_heights],
+            # New: explicit triangle strip vertices for edge-attached triangles
+            "tri_strip": strip_vertices,
             "back_wheel": {
                 "x": float(self.state.x_back),
                 "y": float(self._y_back),

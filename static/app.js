@@ -160,14 +160,6 @@
     const my = 0.5 * (back.y + front.y);
     const phi = body.phi;
     const halfBase = 0.5 * body.base_len;
-    const height = body.height;
-
-    // Local tri points relative to mid point in axle-aligned coords
-    const pts = [
-      [-halfBase, 0],
-      [halfBase, 0],
-      [0, height]
-    ];
 
     // rotate by phi and translate to world, then to screen
     const toScreen = (vx, vy) => {
@@ -176,22 +168,73 @@
       return [toPxX(wx, camX), toPxY(wy)];
     };
 
-    const p0 = toScreen(pts[0][0], pts[0][1]);
-    const p1 = toScreen(pts[1][0], pts[1][1]);
-    const p2 = toScreen(pts[2][0], pts[2][1]);
-
     ctx.save();
-    const grad = ctx.createLinearGradient(p0[0], p2[1], p2[0], p0[1]);
-    grad.addColorStop(0, '#4b97d6');
-    grad.addColorStop(1, '#3dc5a1');
 
-    ctx.beginPath();
-    ctx.moveTo(p0[0], p0[1]);
-    ctx.lineTo(p1[0], p1[1]);
-    ctx.lineTo(p2[0], p2[1]);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
+    // Prefer explicit triangle strip (edge-attached triangles) if provided
+    const hasStrip = body.tri_strip && Array.isArray(body.tri_strip) && body.tri_strip.length >= 3 && Array.isArray(body.tri_strip[0]);
+    if (hasStrip) {
+      const v = body.tri_strip;
+      // Precompute transformed vertices (rigid body)
+      const vs = v.map(([vx, vy]) => toScreen(vx, vy));
+
+      // Single consistent fill for the whole body to avoid per-triangle \"elastic\" shading
+      const pL = vs[0];
+      const pR = vs[vs.length - 1];
+      const grad = ctx.createLinearGradient(pL[0], pL[1], pR[0], pR[1]);
+      grad.addColorStop(0, '#4b97d6');
+      grad.addColorStop(1, '#3dc5a1');
+      ctx.fillStyle = grad;
+
+      // Triangulate as a proper triangle strip with consistent fill
+      ctx.beginPath();
+      for (let i = 0; i < vs.length - 2; i++) {
+        const a = (i % 2 === 0) ? vs[i] : vs[i + 1];
+        const b = (i % 2 === 0) ? vs[i + 1] : vs[i];
+        const c = vs[i + 2];
+        ctx.moveTo(a[0], a[1]);
+        ctx.lineTo(b[0], b[1]);
+        ctx.lineTo(c[0], c[1]);
+        ctx.closePath();
+      }
+      ctx.fill();
+
+      // Subtle outline to emphasize rigid silhouette
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.moveTo(vs[0][0], vs[0][1]);
+      for (let i = 1; i < vs.length; i++) ctx.lineTo(vs[i][0], vs[i][1]);
+      ctx.stroke();
+    } else {
+      // Fallback: simple segmentation into N independent triangles (may attach at corners)
+      const hasTriHeights = body.tri_heights && (Array.isArray(body.tri_heights) || ArrayBuffer.isView(body.tri_heights)) && body.tri_heights.length > 0;
+      const heights = hasTriHeights ? body.tri_heights : [body.height];
+      const n = heights.length;
+      const segLen = body.base_len / n;
+
+      for (let i = 0; i < n; i++) {
+        const left = -halfBase + i * segLen;
+        const right = left + segLen;
+        const mid = (left + right) / 2;
+        const h = heights[i];
+
+        const pL = toScreen(left, 0);
+        const pR = toScreen(right, 0);
+        const pA = toScreen(mid, h);
+
+        const grad = ctx.createLinearGradient(pL[0], pA[1], pA[0], pL[1]);
+        grad.addColorStop(0, '#4b97d6');
+        grad.addColorStop(1, '#3dc5a1');
+
+        ctx.beginPath();
+        ctx.moveTo(pL[0], pL[1]);
+        ctx.lineTo(pR[0], pR[1]);
+        ctx.lineTo(pA[0], pA[1]);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+      }
+    }
 
     // axle
     ctx.beginPath();
@@ -272,7 +315,9 @@ sim`);
     const body = {
       phi: frame.phi,
       base_len: frame.body_base_len,
-      height: frame.body_height
+      height: frame.body_height,
+      tri_heights: frame.tri_heights || null,
+      tri_strip: frame.tri_strip || null
     };
 
     drawWheel(back.x, back.y, back.r, frame.camera_x, '#93c5fd', '#1e3a8a');
