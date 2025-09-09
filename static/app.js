@@ -220,7 +220,7 @@
     statusSpan.style.color = '#9ca3af';
     document.querySelector('.controls').appendChild(statusSpan);
 
-    pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/' });
+    pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.28.2/full/' });
 
     // Load Python simulation code
     const simCode = await (await fetch('static/py/sim.py')).text();
