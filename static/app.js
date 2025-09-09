@@ -3,6 +3,36 @@
   const canvas = document.getElementById('world');
   const ctx = canvas.getContext('2d');
 
+  const mainEl = document.querySelector('main');
+  const BASE_AR = canvas.width / canvas.height;
+
+  function sizeCanvas() {
+    const rect = mainEl.getBoundingClientRect();
+    const styles = window.getComputedStyle(mainEl);
+    const padX = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+    const padY = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+    const availW = Math.max(0, rect.width - padX);
+    const availH = Math.max(0, rect.height - padY);
+
+    if (availW === 0 || availH === 0) return;
+
+    let dispW, dispH;
+    if (availW / availH > BASE_AR) {
+      // Letterbox horizontally: height-limited
+      dispH = availH;
+      dispW = Math.floor(dispH * BASE_AR);
+    } else {
+      // Pillarbox vertically: width-limited
+      dispW = availW;
+      dispH = Math.floor(dispW / BASE_AR);
+    }
+
+    canvas.style.width = dispW + 'px';
+    canvas.style.height = dispH + 'px';
+    canvas.style.marginLeft = 'auto';
+    canvas.style.marginRight = 'auto';
+  }
+
   const playBtn = document.getElementById('playBtn');
   const stopBtn = document.getElementById('stopBtn');
   const resetBtn = document.getElementById('resetBtn');
@@ -325,6 +355,7 @@ sim`);
     resetBtn.disabled = false;
 
     // initial draw
+    sizeCanvas();
     const initialProxy = sim.next_frame(0); // just to read starting camera
     const initial = initialProxy.toJs();
     initialProxy.destroy();
@@ -409,6 +440,7 @@ sim`);
     const initProxy = sim.next_frame(0);
     const init = initProxy.toJs();
     initProxy.destroy();
+    sizeCanvas();
     clear();
     drawGrid(init.camera_x);
     drawTerrain(init.camera_x);
@@ -417,7 +449,7 @@ sim`);
   });
 
   window.addEventListener('resize', () => {
-    // Canvas is fixed size for now; could add responsive behavior if needed.
+    sizeCanvas();
   });
 
   // Kick off
