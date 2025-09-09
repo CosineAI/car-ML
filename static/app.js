@@ -174,24 +174,37 @@
     const hasStrip = body.tri_strip && Array.isArray(body.tri_strip) && body.tri_strip.length >= 3 && Array.isArray(body.tri_strip[0]);
     if (hasStrip) {
       const v = body.tri_strip;
-      // Draw each triangle in the strip so adjacent ones share full edges
-      for (let i = 0; i < v.length - 2; i++) {
-        const p0 = toScreen(v[i][0], v[i][1]);
-        const p1 = toScreen(v[i + 1][0], v[i + 1][1]);
-        const p2 = toScreen(v[i + 2][0], v[i + 2][1]);
+      // Precompute transformed vertices (rigid body)
+      const vs = v.map(([vx, vy]) => toScreen(vx, vy));
 
-        const grad = ctx.createLinearGradient(p0[0], p2[1], p2[0], p0[1]);
-        grad.addColorStop(0, '#4b97d6');
-        grad.addColorStop(1, '#3dc5a1');
+      // Single consistent fill for the whole body to avoid per-triangle \"elastic\" shading
+      const pL = vs[0];
+      const pR = vs[vs.length - 1];
+      const grad = ctx.createLinearGradient(pL[0], pL[1], pR[0], pR[1]);
+      grad.addColorStop(0, '#4b97d6');
+      grad.addColorStop(1, '#3dc5a1');
+      ctx.fillStyle = grad;
 
-        ctx.beginPath();
-        ctx.moveTo(p0[0], p0[1]);
-        ctx.lineTo(p1[0], p1[1]);
-        ctx.lineTo(p2[0], p2[1]);
+      // Triangulate as a proper triangle strip with consistent fill
+      ctx.beginPath();
+      for (let i = 0; i < vs.length - 2; i++) {
+        const a = (i % 2 === 0) ? vs[i] : vs[i + 1];
+        const b = (i % 2 === 0) ? vs[i + 1] : vs[i];
+        const c = vs[i + 2];
+        ctx.moveTo(a[0], a[1]);
+        ctx.lineTo(b[0], b[1]);
+        ctx.lineTo(c[0], c[1]);
         ctx.closePath();
-        ctx.fillStyle = grad;
-        ctx.fill();
       }
+      ctx.fill();
+
+      // Subtle outline to emphasize rigid silhouette
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.moveTo(vs[0][0], vs[0][1]);
+      for (let i = 1; i < vs.length; i++) ctx.lineTo(vs[i][0], vs[i][1]);
+      ctx.stroke();
     } else {
       // Fallback: simple segmentation into N independent triangles (may attach at corners)
       const hasTriHeights = body.tri_heights && (Array.isArray(body.tri_heights) || ArrayBuffer.isView(body.tri_heights)) && body.tri_heights.length > 0;
