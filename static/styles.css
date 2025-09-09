@@ -114,3 +114,29 @@ footer {
   color: var(--muted);
   padding: 10px 18px 20px;
 }
+
+/* Evolution panel layout */
+#evoPanel {
+  display: grid;
+  grid-template-columns: 220px 180px 1fr;
+  gap: 12px;
+  align-items: stretch;
+}
+
+#evoPanel > div {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 800px) {
+  #evoPanel {
+    grid-template-columns: 1fr;
+  }
+  #evoPanel > div {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+}
