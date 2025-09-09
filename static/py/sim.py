@@ -57,21 +57,54 @@ class CarParams:
     body_base_ratio: float
     body_height: float
     omega: float
+    n_tris: int
+    tri_heights: list[float]
 
     @staticmethod
     def create_random(rng: random.Random) -> "CarParams":
+        # Base car dimensions
+        r_back = rng.uniform(0.35, 1.0)
+        r_front = rng.uniform(0.35, 1.0)
+        wheelbase = rng.uniform(1.0, 3.0)
+        body_base_ratio = rng.uniform(0.5, 1.1)  # fraction of wheelbase
+        body_height = rng.uniform(0.3, 1.6)
+        omega = rng.uniform(1.4, 2.8)
+        # Chassis variety: 1–4 triangles, each with its own height
+        n_tris = rng.randint(1, 4)
+        tri_heights = [
+            clamp(rng.gauss(body_height, 0.25), 0.2, 2.0) for _ in range(n_tris)
+        ]
         return CarParams(
-            r_back=rng.uniform(0.35, 1.0),
-            r_front=rng.uniform(0.35, 1.0),
-            wheelbase=rng.uniform(1.0, 3.0),
-            body_base_ratio=rng.uniform(0.5, 1.1),  # fraction of wheelbase
-            body_height=rng.uniform(0.3, 1.6),
-            omega=rng.uniform(1.4, 2.8),
+            r_back=r_back,
+            r_front=r_front,
+            wheelbase=wheelbase,
+            body_base_ratio=body_base_ratio,
+            body_height=body_height,
+            omega=omega,
+            n_tris=n_tris,
+            tri_heights=tri_heights,
         )
 
     def mutated(self, rng: random.Random, scale: float = 0.15) -> "CarParams":
         def n(x, lo, hi, s=scale):
             return clamp(x + rng.gauss(0, s * (hi - lo)), lo, hi)
+
+        # Occasionally change the number of triangles
+        if rng.random() < 0.2:
+            n_tris_new = self.n_tris + rng.choice([-1, 1])
+            if n_tris_new < 1:
+                n_tris_new = 1
+            if n_tris_new > 4:
+                n_tris_new = 4
+        else:
+            n_tris_new = self.n_tris
+
+        # Mutate or (re)create individual triangle heights
+        tri_heights_new: list[float] = []
+        base_for_new = self.body_height
+        for i in range(n_tris_new):
+            base = self.tri_heights[i] if i < len(self.tri_heights) else base_for_new
+            tri_heights_new.append(n(base, 0.2, 2.0))
 
         return CarParams(
             r_back=n(self.r_back, 0.3, 1.2),
@@ -80,6 +113,8 @@ class CarParams:
             body_base_ratio=n(self.body_base_ratio, 0.4, 1.3),
             body_height=n(self.body_height, 0.2, 2.0),
             omega=n(self.omega, 1.0, 3.2),
+            n_tris=n_tris_new,
+            tri_heights=tri_heights_new,
         )
 
 
@@ -229,7 +264,10 @@ class Simulator:
             "camera_x": float(cam_x),
             "phi": float(phi),
             "body_base_len": float(body_base_len),
+            # Provide both legacy single height and per-triangle heights
             "body_height": float(self.params.body_height),
+            "n_tris": int(self.params.n_tris),
+            "tri_heights": [float(h) for h in self.params.tri_heights],
             "back_wheel": {
                 "x": float(self.state.x_back),
                 "y": float(self._y_back),

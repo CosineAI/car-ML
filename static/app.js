@@ -160,14 +160,12 @@
     const my = 0.5 * (back.y + front.y);
     const phi = body.phi;
     const halfBase = 0.5 * body.base_len;
-    const height = body.height;
 
-    // Local tri points relative to mid point in axle-aligned coords
-    const pts = [
-      [-halfBase, 0],
-      [halfBase, 0],
-      [0, height]
-    ];
+    // Prefer explicit per-triangle heights if provided; otherwise fall back to single height
+    const hasTriHeights = body.tri_heights && (Array.isArray(body.tri_heights) || ArrayBuffer.isView(body.tri_heights)) && body.tri_heights.length > 0;
+    const heights = hasTriHeights ? body.tri_heights : [body.height];
+    const n = heights.length;
+    const segLen = body.base_len / n;
 
     // rotate by phi and translate to world, then to screen
     const toScreen = (vx, vy) => {
@@ -176,22 +174,30 @@
       return [toPxX(wx, camX), toPxY(wy)];
     };
 
-    const p0 = toScreen(pts[0][0], pts[0][1]);
-    const p1 = toScreen(pts[1][0], pts[1][1]);
-    const p2 = toScreen(pts[2][0], pts[2][1]);
-
     ctx.save();
-    const grad = ctx.createLinearGradient(p0[0], p2[1], p2[0], p0[1]);
-    grad.addColorStop(0, '#4b97d6');
-    grad.addColorStop(1, '#3dc5a1');
 
-    ctx.beginPath();
-    ctx.moveTo(p0[0], p0[1]);
-    ctx.lineTo(p1[0], p1[1]);
-    ctx.lineTo(p2[0], p2[1]);
-    ctx.closePath();
-    ctx.fillStyle = grad;
-    ctx.fill();
+    for (let i = 0; i < n; i++) {
+      const left = -halfBase + i * segLen;
+      const right = left + segLen;
+      const mid = (left + right) / 2;
+      const h = heights[i];
+
+      const pL = toScreen(left, 0);
+      const pR = toScreen(right, 0);
+      const pA = toScreen(mid, h);
+
+      const grad = ctx.createLinearGradient(pL[0], pA[1], pA[0], pL[1]);
+      grad.addColorStop(0, '#4b97d6');
+      grad.addColorStop(1, '#3dc5a1');
+
+      ctx.beginPath();
+      ctx.moveTo(pL[0], pL[1]);
+      ctx.lineTo(pR[0], pR[1]);
+      ctx.lineTo(pA[0], pA[1]);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
 
     // axle
     ctx.beginPath();
@@ -272,7 +278,8 @@ sim`);
     const body = {
       phi: frame.phi,
       base_len: frame.body_base_len,
-      height: frame.body_height
+      height: frame.body_height,
+      tri_heights: frame.tri_heights || null
     };
 
     drawWheel(back.x, back.y, back.r, frame.camera_x, '#93c5fd', '#1e3a8a');
