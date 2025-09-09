@@ -1,5 +1,5 @@
 /* global loadPyodide */
-(() =&gt; {
+(() => {
   const canvas = document.getElementById('world');
   const ctx = canvas.getContext('2d');
 
@@ -47,7 +47,7 @@
     const startUnit = Math.floor((camX - marginLeftPx / xScale) / 5) * 5;
     const endUnit = Math.ceil((camX + (canvas.width - marginLeftPx) / xScale) / 5) * 5;
 
-    for (let u = startUnit; u &lt;= endUnit; u += 5) {
+    for (let u = startUnit; u <= endUnit; u += 5) {
       const x = toPxX(u, camX);
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -57,7 +57,7 @@
 
     // horizontal grid lines every 1 unit in world y
     const maxWorldY = (canvas.height - marginBottomPx) / yScale;
-    for (let y = 0; y &lt;= maxWorldY; y += 1) {
+    for (let y = 0; y <= maxWorldY; y += 1) {
       const py = toPxY(y);
       ctx.beginPath();
       ctx.moveTo(0, py);
@@ -78,9 +78,9 @@
     const xMax = camX + (canvas.width - marginLeftPx) / xScale + 2;
 
     let iStart = 0;
-    while (iStart &lt; N - 1 &amp;&amp; xs[iStart] &lt; xMin) iStart++;
+    while (iStart < N - 1 && xs[iStart] < xMin) iStart++;
     let iEnd = iStart;
-    while (iEnd &lt; N &amp;&amp; xs[iEnd] &lt; xMax) iEnd++;
+    while (iEnd < N && xs[iEnd] < xMax) iEnd++;
 
     ctx.save();
     ctx.lineWidth = 2;
@@ -93,7 +93,7 @@
     // Fill below terrain to bottom to give ground color
     ctx.beginPath();
     let first = true;
-    for (let i = Math.max(0, iStart - 1); i &lt; Math.min(N, iEnd + 1); i++) {
+    for (let i = Math.max(0, iStart - 1); i < Math.min(N, iEnd + 1); i++) {
       const sx = toPxX(xs[i], camX);
       const sy = toPxY(ys[i]);
       if (first) {
@@ -112,7 +112,7 @@
     // Terrain stroke
     ctx.beginPath();
     first = true;
-    for (let i = Math.max(0, iStart - 1); i &lt; Math.min(N, iEnd + 1); i++) {
+    for (let i = Math.max(0, iStart - 1); i < Math.min(N, iEnd + 1); i++) {
       const sx = toPxX(xs[i], camX);
       const sy = toPxY(ys[i]);
       if (first) {
@@ -143,7 +143,7 @@
     // spokes for motion hint
     ctx.lineWidth = 2;
     ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-    for (let i = 0; i &lt; 3; i++) {
+    for (let i = 0; i < 3; i++) {
       const a = (i / 3) * Math.PI * 2;
       ctx.beginPath();
       ctx.moveTo(px, py);
@@ -170,7 +170,7 @@
     ];
 
     // rotate by phi and translate to world, then to screen
-    const toScreen = (vx, vy) =&gt; {
+    const toScreen = (vx, vy) => {
       const wx = mx + vx * Math.cos(phi) - vy * Math.sin(phi);
       const wy = my + vx * Math.sin(phi) + vy * Math.cos(phi);
       return [toPxX(wx, camX), toPxY(wy)];
@@ -289,7 +289,7 @@ sim`);
     rafId = requestAnimationFrame(loop);
   }
 
-  playBtn.addEventListener('click', () =&gt; {
+  playBtn.addEventListener('click', () => {
     if (playing) return;
     playing = true;
     playBtn.disabled = true;
@@ -297,18 +297,18 @@ sim`);
     loop();
   });
 
-  stopBtn.addEventListener('click', () =&gt; {
+  stopBtn.addEventListener('click', () => {
     playing = false;
     playBtn.disabled = false;
     stopBtn.disabled = true;
     if (rafId) cancelAnimationFrame(rafId);
   });
 
-  speedRange.addEventListener('input', () =&gt; {
+  speedRange.addEventListener('input', () => {
     speedValue.textContent = `${speedRange.value}x`;
   });
 
-  resetBtn.addEventListener('click', async () =&gt; {
+  resetBtn.addEventListener('click', async () => {
     // Stop current sim
     playing = false;
     playBtn.disabled = false;
@@ -333,12 +333,12 @@ sim`);
     updateStats(init);
   });
 
-  window.addEventListener('resize', () =&gt; {
+  window.addEventListener('resize', () => {
     // Canvas is fixed size for now; could add responsive behavior if needed.
   });
 
   // Kick off
-  init().catch(err =&gt; {
+  init().catch(err => {
     console.error(err);
     const msg = document.createElement('div');
     msg.textContent = 'Failed to initialize Pyodide. Check your connection.';

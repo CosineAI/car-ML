@@ -129,7 +129,7 @@ class Simulator:
             self.params = CarParams.random(self.rng)
         else:
             # Hill climbing with occasional exploration
-            if self.rng.random() &lt; 0.2:
+            if self.rng.random() < 0.2:
                 self.params = CarParams.random(self.rng)
             else:
                 self.params = self.best_params.mutated(self.rng, scale=0.18)
@@ -171,11 +171,11 @@ class Simulator:
 
         # Very steep slope threshold: traction loss
         slope_limit = 0.95  # ~54 deg
-        if abs(math.atan(gb)) &gt; slope_limit or abs(math.atan(gf)) &gt; slope_limit:
+        if abs(math.atan(gb)) > slope_limit or abs(math.atan(gf)) > slope_limit:
             v = 0.0
 
         dx = v * dt
-        if dx &lt; 1e-4:
+        if dx < 1e-4:
             self.state.stuck_time += dt
         else:
             self.state.stuck_time = 0.0
@@ -197,14 +197,14 @@ class Simulator:
         # Termination conditions
         time_limit = 60.0
         stuck_limit = 1.4
-        near_end = self._x_front &gt;= (self.terrain.length - 2.0)
+        near_end = self._x_front >= (self.terrain.length - 2.0)
 
-        if self.state.stuck_time &gt; stuck_limit or near_end or self.state.time &gt; time_limit:
+        if self.state.stuck_time > stuck_limit or near_end or self.state.time > time_limit:
             self.state.done = True
 
     def _finalize_attempt(self):
         dist = float(self._distance)
-        if dist &gt; self.best_distance:
+        if dist > self.best_distance:
             self.best_distance = dist
             self.best_params = self.params
         self.attempt += 1
@@ -248,7 +248,7 @@ class Simulator:
         if self._just_finished:
             self._just_finished = False
 
-        if steps &lt; 0:
+        if steps < 0:
             steps = 0
         for _ in range(int(steps)):
             if self.state.done:
