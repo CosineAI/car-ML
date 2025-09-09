@@ -59,7 +59,7 @@ class CarParams:
     omega: float
 
     @staticmethod
-    def random(rng: random.Random) -> "CarParams":
+    def create_random(rng: random.Random) -> "CarParams":
         return CarParams(
             r_back=rng.uniform(0.35, 1.0),
             r_front=rng.uniform(0.35, 1.0),
@@ -126,11 +126,11 @@ class Simulator:
 
     def _init_new_car(self, random_init: bool = False):
         if random_init or self.best_params is None:
-            self.params = CarParams.random(self.rng)
+            self.params = CarParams.create_random(self.rng)
         else:
             # Hill climbing with occasional exploration
             if self.rng.random() < 0.2:
-                self.params = CarParams.random(self.rng)
+                self.params = CarParams.create_random(self.rng)
             else:
                 self.params = self.best_params.mutated(self.rng, scale=0.18)
 
